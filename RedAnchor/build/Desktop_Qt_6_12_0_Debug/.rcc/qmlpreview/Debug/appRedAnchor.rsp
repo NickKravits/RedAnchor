@@ -1,0 +1,6 @@
+--interactive
+--resource
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Debug/.qt/rcc/qmake_RedAnchor.qrc
+--resource
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Debug/.qt/rcc/appRedAnchor_raw_qml_0.qrc
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Debug/redanchor-shell

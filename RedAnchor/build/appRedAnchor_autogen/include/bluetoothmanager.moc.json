@@ -1,0 +1,163 @@
+{
+    "classes": [
+        {
+            "classInfos": [
+                {
+                    "name": "D-Bus Interface",
+                    "value": "org.bluez.Agent1"
+                }
+            ],
+            "className": "BluezAgentAdaptor",
+            "lineNumber": 58,
+            "object": true,
+            "qualifiedClassName": "BluezAgentAdaptor",
+            "slots": [
+                {
+                    "access": "public",
+                    "index": 0,
+                    "lineNumber": 71,
+                    "name": "Release",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "device",
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "name": "msg",
+                            "type": "QDBusMessage"
+                        }
+                    ],
+                    "index": 1,
+                    "lineNumber": 72,
+                    "name": "RequestPinCode",
+                    "returnType": "QString"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "type": "QString"
+                        }
+                    ],
+                    "index": 2,
+                    "lineNumber": 80,
+                    "name": "DisplayPinCode",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "name": "msg",
+                            "type": "QDBusMessage"
+                        }
+                    ],
+                    "index": 3,
+                    "lineNumber": 81,
+                    "name": "RequestPasskey",
+                    "returnType": "uint"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "type": "uint"
+                        },
+                        {
+                            "type": "ushort"
+                        }
+                    ],
+                    "index": 4,
+                    "lineNumber": 86,
+                    "name": "DisplayPasskey",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "device",
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "type": "uint"
+                        },
+                        {
+                            "name": "msg",
+                            "type": "QDBusMessage"
+                        }
+                    ],
+                    "index": 5,
+                    "lineNumber": 87,
+                    "name": "RequestConfirmation",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "device",
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "name": "msg",
+                            "type": "QDBusMessage"
+                        }
+                    ],
+                    "index": 6,
+                    "lineNumber": 88,
+                    "name": "RequestAuthorization",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "arguments": [
+                        {
+                            "name": "device",
+                            "type": "QDBusObjectPath"
+                        },
+                        {
+                            "type": "QString"
+                        },
+                        {
+                            "name": "msg",
+                            "type": "QDBusMessage"
+                        }
+                    ],
+                    "index": 7,
+                    "lineNumber": 89,
+                    "name": "AuthorizeService",
+                    "returnType": "void"
+                },
+                {
+                    "access": "public",
+                    "index": 8,
+                    "lineNumber": 90,
+                    "name": "Cancel",
+                    "returnType": "void"
+                }
+            ],
+            "superClasses": [
+                {
+                    "access": "public",
+                    "name": "QDBusAbstractAdaptor"
+                }
+            ]
+        }
+    ],
+    "inputFile": "bluetoothmanager.cpp",
+    "outputRevision": 69
+}

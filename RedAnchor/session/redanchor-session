@@ -1,0 +1,89 @@
+#!/bin/sh
+# Сессия RedAnchor: запускает оболочку на весь экран вместо GNOME.
+# gamescope предпочтительнее — в нём же потом будут запускаться игры;
+# cage — простой киоск-композитор как запасной вариант.
+#
+# Всё, что пишут композитор и оболочка, сохраняется в журнал:
+#   ~/.local/state/redanchor/session.log  (прошлый запуск — session.log.old)
+# Если сессия сразу возвращает на экран входа — причина там.
+
+export XDG_CURRENT_DESKTOP=RedAnchor
+export XDG_SESSION_DESKTOP=redanchor
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/redanchor"
+LOG="$STATE_DIR/session.log"
+mkdir -p "$STATE_DIR"
+[ -f "$LOG" ] && mv -f "$LOG" "$LOG.old"
+exec >"$LOG" 2>&1
+
+log() { echo "redanchor-session: $*"; }
+
+log "$(date '+%F %T') старт, сеанс ${XDG_SESSION_TYPE:-?}, место ${XDG_SEAT:-?}, vt ${XDG_VTNR:-?}"
+
+# Оболочка лежит рядом со скриптом; REDANCHOR_SHELL — чтобы подставить свою сборку
+SHELL_BIN="${REDANCHOR_SHELL:-$(dirname "$(readlink -f "$0")")/redanchor-shell}"
+if [ ! -x "$SHELL_BIN" ]; then
+    SHELL_BIN="$(command -v redanchor-shell)"
+fi
+if [ -z "$SHELL_BIN" ] || [ ! -x "$SHELL_BIN" ]; then
+    log "не найден redanchor-shell (выполните sudo cmake --install в каталоге сборки)"
+    exit 1
+fi
+log "оболочка: $SHELL_BIN"
+
+# Не хватает библиотек (Qt не найден) — сразу видно в журнале
+MISSING="$(ldd "$SHELL_BIN" 2>/dev/null | grep 'not found')"
+if [ -n "$MISSING" ]; then
+    log "оболочке не хватает библиотек:"
+    echo "$MISSING"
+    exit 1
+fi
+
+# Композитор сам выходит, когда закрывается оболочка. Если он завершился с ошибкой
+# быстрее этого (секунды), считаем, что он не смог запуститься, и пробуем следующий.
+QUICK_FAIL=10
+
+try_run() {
+    name="$1"
+    shift
+    command -v "$name" >/dev/null 2>&1 || { log "$name не установлен"; return 1; }
+    log "запуск: $*"
+    # Оболочка подстраивает запуск игр под композитор (cage — без Xwayland)
+    export REDANCHOR_SESSION_COMPOSITOR="$name"
+    restarts=0
+    while :; do
+        start=$(date +%s)
+        "$@"
+        code=$?
+        elapsed=$(( $(date +%s) - start ))
+        log "$name завершился с кодом $code через $elapsed с"
+        # Обычный выход оболочки — сессия закончена
+        [ "$code" -eq 0 ] && exit 0
+        # Сразу упал — не смог запуститься, пробуем следующий способ
+        [ "$elapsed" -lt "$QUICK_FAIL" ] && return 1
+        # Упал посреди работы — поднимаем заново, а не выкидываем на экран входа
+        restarts=$((restarts + 1))
+        if [ "$restarts" -gt 5 ]; then
+            log "слишком много падений подряд, выходим"
+            exit "$code"
+        fi
+        log "перезапуск ($restarts)"
+    done
+}
+
+if [ -z "$REDANCHOR_COMPOSITOR" ] || [ "$REDANCHOR_COMPOSITOR" = gamescope ]; then
+    # Внутри gamescope приложения работают через Xwayland (Qt нужен libxcb-cursor0)
+    try_run gamescope gamescope -f -- env QT_QPA_PLATFORM=xcb "$SHELL_BIN" --fullscreen "$@"
+fi
+if [ -z "$REDANCHOR_COMPOSITOR" ] || [ "$REDANCHOR_COMPOSITOR" = cage ]; then
+    try_run cage cage -s -- env QT_QPA_PLATFORM=wayland "$SHELL_BIN" --fullscreen "$@"
+    # Нет 3D-ускорения (виртуальная машина без него, нет драйвера видеокарты): композитор
+    # рисует процессором, оболочка — через программный OpenGL (llvmpipe). Медленно, но работает.
+    log "пробуем без 3D-ускорения (программная отрисовка)"
+    export WLR_RENDERER=pixman
+    try_run cage cage -s -- env QT_QPA_PLATFORM=wayland LIBGL_ALWAYS_SOFTWARE=1 \
+        "$SHELL_BIN" --fullscreen "$@"
+fi
+
+log "не удалось запустить ни один композитор (нужен gamescope или cage)"
+exit 1

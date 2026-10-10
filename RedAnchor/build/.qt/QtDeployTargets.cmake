@@ -1,0 +1,5 @@
+set(__QT_DEPLOY_TARGETS "appRedAnchor;redanchor-pair-controller")
+set(__QT_DEPLOY_TARGET_appRedAnchor_FILE /home/dev/RedAnchor/RedAnchor/build/redanchor-shell)
+set(__QT_DEPLOY_TARGET_appRedAnchor_TYPE EXECUTABLE)
+set(__QT_DEPLOY_TARGET_redanchor-pair-controller_FILE /home/dev/RedAnchor/RedAnchor/build/redanchor-pair-controller)
+set(__QT_DEPLOY_TARGET_redanchor-pair-controller_TYPE EXECUTABLE)

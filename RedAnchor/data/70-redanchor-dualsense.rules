@@ -1,0 +1,7 @@
+# RedAnchor Shell: доступ к световой панели DualSense, чтобы менять её цвет
+# из раздела настроек «Геймпады» без прав root.
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="input*:rgb:indicator", RUN+="/bin/chmod 0666 /sys%p/brightness /sys%p/multi_intensity"
+
+# Система раскладки RedAnchor: виртуальный контроллер Xbox для игр без поддержки DualSense.
+# Доступ к /dev/uinput получает пользователь активной сессии (как правило steam-devices).
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

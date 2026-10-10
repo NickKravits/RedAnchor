@@ -1,0 +1,8 @@
+/usr/local/libexec/redanchor-steam
+/usr/local/bin/redanchor-shell
+/usr/local/libexec/redanchor-pair-controller
+/usr/local/libexec/redanchor-components
+/usr/share/polkit-1/actions/org.redanchor.shell.policy
+/usr/lib/udev/rules.d/70-redanchor-dualsense.rules
+/usr/local/bin/redanchor-session
+/usr/share/wayland-sessions/redanchor.desktop

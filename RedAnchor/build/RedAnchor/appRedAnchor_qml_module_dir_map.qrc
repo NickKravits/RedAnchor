@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="/qt/qml/RedAnchor">/home/dev/RedAnchor/RedAnchor/build/RedAnchor</file>
+
+  </qresource>
+</RCC>

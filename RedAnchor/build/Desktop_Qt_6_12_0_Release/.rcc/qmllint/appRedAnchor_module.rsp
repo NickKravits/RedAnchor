@@ -1,0 +1,14 @@
+-I
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Release
+-I
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Release/RedAnchor
+-I
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Release
+-I
+/home/dev/Qt/6.12.0/gcc_64/qml
+--resource
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Release/.qt/rcc/qmake_RedAnchor.qrc
+--resource
+/home/dev/RedAnchor/RedAnchor/build/Desktop_Qt_6_12_0_Release/.qt/rcc/appRedAnchor_raw_qml_0.qrc
+--module
+RedAnchor

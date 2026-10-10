@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "dgSpecHash": "GjJZ/bBCTrc=",
+  "success": true,
+  "projectFilePath": "/home/dev/RedAnchor/RedAnchor/tools/steam/RedAnchorSteam.csproj",
+  "expectedPackageFiles": [
+    "/home/dev/.nuget/packages/microsoft.net.illink.tasks/10.0.12/microsoft.net.illink.tasks.10.0.12.nupkg.sha512",
+    "/home/dev/.nuget/packages/protobuf-net/3.2.56/protobuf-net.3.2.56.nupkg.sha512",
+    "/home/dev/.nuget/packages/protobuf-net.core/3.2.56/protobuf-net.core.3.2.56.nupkg.sha512",
+    "/home/dev/.nuget/packages/steamkit2/3.4.0/steamkit2.3.4.0.nupkg.sha512",
+    "/home/dev/.nuget/packages/system.io.hashing/10.0.1/system.io.hashing.10.0.1.nupkg.sha512",
+    "/home/dev/.nuget/packages/zstdsharp.port/0.8.7/zstdsharp.port.0.8.7.nupkg.sha512",
+    "/home/dev/.nuget/packages/microsoft.netcore.app.runtime.linux-x64/10.0.12/microsoft.netcore.app.runtime.linux-x64.10.0.12.nupkg.sha512",
+    "/home/dev/.nuget/packages/microsoft.aspnetcore.app.runtime.linux-x64/10.0.12/microsoft.aspnetcore.app.runtime.linux-x64.10.0.12.nupkg.sha512",
+    "/home/dev/.nuget/packages/microsoft.netcore.app.host.linux-x64/10.0.12/microsoft.netcore.app.host.linux-x64.10.0.12.nupkg.sha512"
+  ],
+  "logs": []
+}

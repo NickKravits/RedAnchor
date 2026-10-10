@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=RedAnchor
+Comment=Консольная оболочка RedAnchor
+Exec=/usr/local/bin/redanchor-session
+TryExec=/usr/local/bin/redanchor-session
+Type=Application
+DesktopNames=RedAnchor

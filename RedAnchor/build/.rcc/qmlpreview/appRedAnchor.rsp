@@ -1,0 +1,8 @@
+--interactive
+--resource
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/qmake_RedAnchor.qrc
+--resource
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/appRedAnchor_raw_qml_0.qrc
+--resource
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/redanchor_shaders.qrc
+/home/dev/RedAnchor/RedAnchor/build/redanchor-shell

@@ -1,0 +1,30 @@
+module RedAnchor
+typeinfo appRedAnchor.qmltypes
+prefer :/qt/qml/RedAnchor/
+Main 254.0 Main.qml
+singleton Theme 254.0 Theme.qml
+singleton Keyboard 254.0 Keyboard.qml
+Icon 254.0 Icon.qml
+AppBackground 254.0 AppBackground.qml
+ButtonGlyph 254.0 ButtonGlyph.qml
+ConsoleButton 254.0 ConsoleButton.qml
+ConsoleListItem 254.0 ConsoleListItem.qml
+ConsoleTextField 254.0 ConsoleTextField.qml
+DualSense 254.0 DualSense.qml
+HintBar 254.0 HintBar.qml
+InstructionStep 254.0 InstructionStep.qml
+OnScreenKeyboard 254.0 OnScreenKeyboard.qml
+SetupPage 254.0 SetupPage.qml
+SignalBars 254.0 SignalBars.qml
+Spinner 254.0 Spinner.qml
+StepIndicator 254.0 StepIndicator.qml
+UsbCable 254.0 UsbCable.qml
+ControllerScreen 254.0 ControllerScreen.qml
+PairingScreen 254.0 PairingScreen.qml
+LanguageScreen 254.0 LanguageScreen.qml
+NetworkScreen 254.0 NetworkScreen.qml
+AccountScreen 254.0 AccountScreen.qml
+WelcomeScreen 254.0 WelcomeScreen.qml
+HomeScreen 254.0 HomeScreen.qml
+depends QtQuick
+

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=RedAnchor
+Comment=Консольная оболочка RedAnchor
+Exec=@SESSION_BIN@
+TryExec=@SESSION_BIN@
+Type=Application
+DesktopNames=RedAnchor

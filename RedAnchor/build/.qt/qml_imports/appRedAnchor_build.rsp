@@ -1,0 +1,15 @@
+-rootPath
+/home/dev/RedAnchor/RedAnchor
+-cmake-output
+-output-file
+/home/dev/RedAnchor/RedAnchor/build/.qt/qml_imports/appRedAnchor_build.cmake
+-importPath
+/home/dev/RedAnchor/RedAnchor/build
+-importPath
+/home/dev/RedAnchor/RedAnchor/build/RedAnchor
+-importPath
+/home/dev/Qt/6.12.0/gcc_64/qml
+-qrcFiles
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/qmake_RedAnchor.qrc
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/appRedAnchor_raw_qml_0.qrc
+/home/dev/RedAnchor/RedAnchor/build/.qt/rcc/redanchor_shaders.qrc
