@@ -37,11 +37,11 @@ Popup {
     focus: true
     closePolicy: Popup.CloseOnEscape
 
-    Overlay.modal: Rectangle { color: Qt.rgba(0.01, 0.02, 0.05, 0.72) }
+    Overlay.modal: Rectangle { color: Qt.rgba(0.02, 0.022, 0.026, 0.72) }
 
     background: Rectangle {
         radius: Theme.radius * 1.5
-        color: "#0d1426"
+        color: "#1b1e24"
         border.width: 1
         border.color: Theme.outline
     }

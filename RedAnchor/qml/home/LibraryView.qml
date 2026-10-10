@@ -36,6 +36,8 @@ FocusScope {
             return qsTr("В очереди на загрузку")
         if (d.status === "failed")
             return d.message || qsTr("Загрузка не удалась")
+        if (d.status === "confirm")
+            return qsTr("Подтвердите установку в Steam")
         return d.progress >= 0 ? qsTr("Загружается: %1%").arg(Math.round(d.progress * 100)) : qsTr("Загружается…")
     }
 
@@ -50,6 +52,9 @@ FocusScope {
             actions.unshift({ text: qsTr("Играть"), icon: "play", run: () => GameLauncher.launch(game.id) })
         if (game.installed) {
             actions.push({ text: qsTr("Удалить игру"), icon: "trash", run: () => root.confirmRemove(game) })
+        } else if (d && d.status === "confirm") {
+            actions.push({ text: qsTr("Подтвердить в Steam"), icon: "download", run: () => StoreManager.install(game.store, game.appId, game.title) })
+            actions.push({ text: qsTr("Отменить загрузку"), icon: "close", run: () => StoreManager.cancel(game.id) })
         } else if (d && d.status === "failed") {
             actions.push({ text: qsTr("Повторить загрузку"), icon: "download", run: () => StoreManager.install(game.store, game.appId, game.title) })
             actions.push({ text: qsTr("Убрать из библиотеки"), icon: "trash", run: () => StoreManager.cancel(game.id) })

@@ -57,6 +57,17 @@ public:
     // Каталог игр магазина в профиле текущего пользователя (создаётся при надобности)
     QString gamesDir(const QString &store) const;
 
+    // Для StoreManager: установленные игры магазина, библиотекой которого управляет его
+    // клиент (Steam). Добавляет новые, обновляет пути, убирает удалённые; незавершённые
+    // загрузки остаются, пока они есть в pending.
+    struct StoreGame {
+        QString appId;
+        QString title;
+        QString path;
+        qint64 sizeBytes = 0;
+    };
+    void syncStore(const QString &store, const QList<StoreGame> &installed, const QStringList &pending);
+
     // Для StoreManager: игра поставлена на загрузку / установлена / удалена
     void addPending(const QString &store, const QString &appId, const QString &title);
     void addInstalled(const QString &store, const QString &appId, const QString &title,

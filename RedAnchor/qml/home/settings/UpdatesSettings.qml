@@ -3,7 +3,7 @@ import QtQuick
 import "ModelSync.js" as ModelSync
 
 // Настройки → Обновления: состояние и установка компонентов для игр —
-// графический драйвер, Vulkan и Proton.
+// системные пакеты сессии, графический драйвер, Vulkan, клиент Steam, Proton и gogdl.
 FocusScope {
     id: root
 
@@ -58,6 +58,15 @@ FocusScope {
             wrapMode: Text.WordWrap
             text: qsTr("Драйвер NVIDIA начнёт работать после перезагрузки консоли.")
             color: Theme.warning
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSmall
+        }
+        Text {
+            visible: ComponentsManager.steamInstalled
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: qsTr("Steam обновляется сам. Вход — один раз в Big Picture; игры Steam запускаются через Proton Experimental.")
+            color: Theme.textSecondary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSmall
         }

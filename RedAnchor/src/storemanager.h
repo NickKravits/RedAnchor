@@ -18,35 +18,35 @@ class QJSEngine;
 class QNetworkAccessManager;
 class QProcess;
 class QQmlEngine;
+class SteamClient;
 
-// Магазины игр: Steam (DepotDownloader) и GOG (gogdl).
+// Магазины игр: Steam (официальный клиент, SteamClient) и GOG (gogdl).
 //
-// Инструменты общие для всех пользователей, лежат в ~/.local/share/RedAnchor/RedAnchor Shell/tools,
-// а ставит и обновляет их ComponentsManager («Настройки → Обновления»).
+// Инструмент GOG общий для всех пользователей, лежит в ~/.local/share/RedAnchor/RedAnchor Shell/tools,
+// его и клиент Steam ставит ComponentsManager («Настройки → Обновления»).
 // Всё остальное своё у каждого пользователя консоли (папка профиля):
-//   stores/<магазин>/  — вход в магазин, кэш списка игр, настройки инструмента;
-//   games/<магазин>/   — установленные игры (их учитывает GameLibrary).
+//   stores/<магазин>/  — вход в магазин, кэш списка игр (Steam — ещё и HOME клиента Steam);
+//   games/gog/         — установленные игры GOG; игры Steam — в библиотеке клиента
+//                         (stores/steam/home/.local/share/Steam/steamapps).
 //
-// Steam: вход по QR-коду из мобильного приложения Steam или по логину и паролю
-// (с подтверждением Steam Guard). DepotDownloader запоминает вход под логином аккаунта.
-// Библиотеку игр, имя профиля и аватар получает помощник redanchor-steam (SteamKit2)
-// тем же сохранённым входом; качает игры DepotDownloader.
+// Steam: вход один раз в Steam Big Picture (поверх оболочки, как игра), дальше клиент работает
+// в фоне; библиотека, установка и запуск — через него (подробности — в steamclient.h).
 // GOG: вход через страницу входа во встроенном браузере (WebLoginWindow.qml передаёт код).
 //
 // Поставленная на загрузку игра сразу появляется в библиотеке (GameLibrary::addPending).
-// Загрузки идут по очереди, по одной игре.
+// Загрузки GOG идут по очереди, по одной игре; загрузки Steam — в очереди клиента Steam.
 class StoreManager : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
 
-    // { steam|gog: { toolInstalled, toolBusy, toolProgress (0..1 | -1), toolMessage,
-    //                signedIn, account (Steam — имя профиля), avatar (URL), busy, message,
-    //                guard ("" | "code" | "mobile"),
-    //                qr (QR-код входа — строки из символов-блоков), listTitle } }
+    // { steam|gog: { toolInstalled (Steam — клиент установлен), signedIn, account (Steam — имя
+    //                профиля), avatar (URL), busy, message, listTitle,
+    //                Steam ещё: phase ("" | starting | signin | bigpicture | stopping),
+    //                phaseProgress (0..1 | -1), online } }
     Q_PROPERTY(QVariantMap stores READ stores NOTIFY storesChanged)
-    // { steam|gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | failed), progress }] }
+    // { steam|gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | confirm | failed), progress }] }
     Q_PROPERTY(QVariantMap owned READ owned NOTIFY ownedChanged)
     // [{ id, store, appId, title, status, progress, message }]
     Q_PROPERTY(QVariantList downloads READ downloads NOTIFY downloadsChanged)
@@ -74,17 +74,14 @@ public:
     Q_INVOKABLE QString loginUrl(const QString &store) const;
     // Код авторизации со страницы входа
     Q_INVOKABLE void completeWebLogin(const QString &store, const QString &code);
-    // Вход в Steam: по QR-коду (логин не нужен — имя аккаунта берём из запомненного входа)
-    // или по логину и паролю
-    Q_INVOKABLE void steamQrLogin();
-    Q_INVOKABLE void steamLogin(const QString &user, const QString &password);
-    Q_INVOKABLE void steamGuard(const QString &code);
-    Q_INVOKABLE void cancelSteamLogin();
+    // Вход в Steam: Big Picture поверх оболочки, закрывается сам после входа
+    Q_INVOKABLE void steamSignIn();
+    // Открыть Steam Big Picture (магазин Steam, настройки) и закрыть его
+    Q_INVOKABLE void openSteam();
+    Q_INVOKABLE void closeSteam();
     Q_INVOKABLE void signOut(const QString &store);
-    // Обновить список игр (Steam — витрина магазина, GOG — купленные игры)
+    // Обновить список купленных игр
     Q_INVOKABLE void refresh(const QString &store);
-    // Поиск в магазине Steam
-    Q_INVOKABLE void searchSteam(const QString &term);
     Q_INVOKABLE void install(const QString &store, const QString &appId, const QString &title);
     Q_INVOKABLE void cancel(const QString &gameId);
     Q_INVOKABLE void uninstall(const QString &gameId);
@@ -94,9 +91,8 @@ public:
     // Пока сведений нет — запрашивает их; по готовности придёт compatibilityChanged(gameId).
     Q_INVOKABLE QVariantMap compatibility(const QString &store, const QString &appId);
 
-    // Как запускать игру Steam (версию для Windows): { executable, arguments, workingdir }
-    // или пустой объект при ошибке. Для GameLauncher.
-    void steamLaunchInfo(const QString &appId, std::function<void(const QVariantMap &info)> onReady);
+    // Клиент Steam (запуск игр Steam — GameLauncher)
+    SteamClient *steam() const { return m_steam; }
     // Пути для запуска игр GOG
     QString gogdlExecutable() const { return gogdlPath(); }
     QString gogAuthConfig() const { return gogAuthFile(); }
@@ -129,11 +125,8 @@ private:
         QString toolMessage;
         bool signedIn = false;
         QString account;
-        QString avatar;     // Steam: аватар профиля (URL)
         bool busy = false;
         QString message;
-        QString guard;
-        QString qr;
         QString listTitle;
         QList<OwnedGame> owned;
     };
@@ -154,10 +147,8 @@ private:
     const Store *findStore(const QString &key) const;
     QString toolsDir() const;
     QString storeDir(const QString &key) const;
-    QString depotPath() const;
     QString gogdlPath() const;
     QString gogAuthFile() const;
-    QString steamUser() const;
     QProcessEnvironment environment(const QString &key) const;
 
     // pty — запустить в псевдотерминале (script из util-linux): инструмент выводит
@@ -167,9 +158,7 @@ private:
     void downloadFile(const QUrl &url, const QString &path, std::function<void(double)> onProgress,
                       std::function<void(bool ok, const QString &error)> onDone);
     void gogToken(std::function<void(const QString &token)> onToken);
-    void startSteamLogin(const QString &user, const QStringList &authArgs);
-    void loadSteamList(const QUrl &url, const QString &title, bool search);
-    void refreshSteamLibrary();
+    void syncSteamLibrary();
 
     void reload();
     void loadOwned(const QString &key);
@@ -187,7 +176,7 @@ private:
     QList<Download> m_downloads;
     QProcess *m_activeProcess = nullptr;
     QString m_activeDownload;
-    QProcess *m_steamLogin = nullptr;
+    SteamClient *m_steam = nullptr;
     QNetworkAccessManager *m_network = nullptr;
     QHash<QString, QVariantMap> m_compat;   // gameId -> поддержка геймпада
     QSet<QString> m_compatPending;

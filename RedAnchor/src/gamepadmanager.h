@@ -144,6 +144,10 @@ private:
 
     void rescan();
     void openDevice(const QString &path);
+    // Тачпад и датчики движения геймпада Sony — отдельные устройства ввода. Тачпад система
+    // считает мышью (курсор ездит по экрану от касаний) — забираем его себе (EVIOCGRAB)
+    bool grabTouchpad(int fd, const QString &path);
+    void closeTouchpad(int fd);
     void closeDevice(int index);
     void readEvents(int fd);
     void handleKey(Device &dev, int code, int value);
@@ -165,6 +169,12 @@ private:
 
     QList<Device> m_devices;
     QSet<QString> m_ignored;
+    struct Touchpad {
+        int fd = -1;
+        QString path;
+        QSocketNotifier *notifier = nullptr;
+    };
+    QList<Touchpad> m_touchpads;
     int m_active = -1;
 
     QFileSystemWatcher m_watcher;

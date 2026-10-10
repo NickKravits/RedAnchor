@@ -2,29 +2,38 @@
 
 #include "accountmanager.h"
 #include "gamelibrary.h"
+#include "steamclient.h"
 #include "storemanager.h"
 
 #include <QCollator>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMap>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
 
 #include <algorithm>
+#include <csignal>
 #include <utility>
 
 namespace {
 
-// Экран запуска — не меньше этого, даже если процесс игры появился сразу
-constexpr int MinSplashMs = 4000;
 // Запуск идёт дольше обычного — подсказка на экране
 constexpr int SlowMs = 30000;
-// Дольше не ждём: процесс Proton жив, а процесса игры не видно — убираем экран
+// Дольше не ждём процесса игры. Steam при первом запуске может ставить Proton и среду
+// выполнения (сотни мегабайт), поэтому ему — дольше
 constexpr int GiveUpMs = 120000;
+constexpr int SteamGiveUpMs = 600000;
 // Игра закрылась так быстро после появления — значит, упала при запуске
 constexpr int QuickExitMs = 15000;
+// Процессов игры не видно столько времени подряд — игра закрылась (лаунчеры перезапускаются)
+constexpr int GoneMs = 4000;
+
+// Геймпады Sony: прячем их от игры, когда работает система раскладки (контроллер Xbox)
+const QString kSonyPads = QStringLiteral("0x054c/0x0ce6,0x054c/0x0df2,0x054c/0x05c4,0x054c/0x09cc");
 
 // Последние строки журнала для экрана ошибки
 QString logTail(const QString &path, int lines)
@@ -44,11 +53,28 @@ QString logTail(const QString &path, int lines)
     return useful.mid(qMax<qsizetype>(0, useful.size() - lines)).join(QLatin1Char('\n'));
 }
 
+QByteArray procFile(const QString &pid, const char *name)
+{
+    QFile file(QStringLiteral("/proc/") + pid + QLatin1Char('/') + QLatin1String(name));
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+void signalAll(const QList<qint64> &pids, int sig)
+{
+    for (qint64 pid : pids)
+        ::kill(pid_t(pid), sig);
+}
+
 } // namespace
 
 GameLauncher::GameLauncher(QObject *parent)
     : QObject(parent)
 {
+}
+
+bool GameLauncher::isSteam() const
+{
+    return m_game.value(QStringLiteral("store")).toString() == QLatin1String("steam");
 }
 
 void GameLauncher::setState(const QString &state, const QString &message)
@@ -59,7 +85,8 @@ void GameLauncher::setState(const QString &state, const QString &message)
         m_details.clear();
     if (state != QLatin1String("starting"))
         m_slow = false;
-    if (state != QLatin1String("starting") && m_watch)
+    // Пока игра идёт, следим за её процессами; остановится — экран уберётся
+    if ((state == QLatin1String("idle") || state == QLatin1String("failed")) && m_watch)
         m_watch->stop();
     emit stateChanged();
 }
@@ -78,8 +105,14 @@ void GameLauncher::fail(const QString &message)
 
 QList<qint64> GameLauncher::gamePids() const
 {
+    if (isSteam())
+        return SteamClient::gameProcesses(m_game.value(QStringLiteral("appId")).toString());
+
     // Wine пишет путь к файлу игры в виде Z:\home\…; приводим к виду /home/…
     const QString needle = m_game.value(QStringLiteral("installPath")).toString().toLower();
+    const QByteArray prefixVar = "STEAM_COMPAT_DATA_PATH=" + m_prefix.toUtf8();
+    const qint64 self = QCoreApplication::applicationPid();
+    const qint64 launcher = m_process ? m_process->processId() : 0;
     QList<qint64> pids;
     if (needle.isEmpty())
         return pids;
@@ -87,46 +120,87 @@ QList<qint64> GameLauncher::gamePids() const
     for (const QString &entry : proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         bool numeric = false;
         const qint64 pid = entry.toLongLong(&numeric);
-        if (!numeric)
+        if (!numeric || pid == self || pid == launcher)
             continue;
-        QFile file(proc.filePath(entry) + QStringLiteral("/cmdline"));
-        if (!file.open(QIODevice::ReadOnly))
-            continue;
-        // Смотрим только на сам исполняемый файл процесса (argv[0]), не на аргументы:
-        // путь к игре есть и в аргументах Proton (python …/proton run …), gogdl и
-        // обёртки Proton steam.exe, но эти процессы появляются раньше игры.
+        // Смотрим на сам исполняемый файл процесса (argv[0]), не на аргументы:
+        // путь к игре есть и в аргументах Proton (python …/proton run …) и gogdl.
         // Wine показывает в argv[0] путь Windows (Z:\home\…\game.exe).
-        QString exe = QString::fromUtf8(file.readAll().split('\0').value(0)).toLower();
+        QString exe = QString::fromUtf8(procFile(entry, "cmdline").split('\0').value(0)).toLower();
         exe.replace(QLatin1Char('\\'), QLatin1Char('/')).replace(QLatin1String("z:/"), QLatin1String("/"));
-        if (!exe.startsWith(needle) || exe.endsWith(QLatin1String("/steam.exe")))
+        if (exe.startsWith(needle) && !exe.endsWith(QLatin1String("/steam.exe"))) {
+            pids.append(pid);
             continue;
-        pids.append(pid);
+        }
+        // Процесс запуска уже вышел: игра — всё, что живёт в её префиксе Wine
+        // (сама игра могла быть запущена лаунчером из другой папки)
+        if (m_processDone && !m_prefix.isEmpty()) {
+            for (const QByteArray &var : procFile(entry, "environ").split('\0')) {
+                if (var == prefixVar) {
+                    pids.append(pid);
+                    break;
+                }
+            }
+        }
     }
     return pids;
 }
 
-// Раз в секунду: появился ли процесс игры
+// Раз в секунду: появились ли процессы игры, живы ли они ещё
 void GameLauncher::checkStarted()
 {
-    if (m_state != QLatin1String("starting") || !m_process)
+    if (m_state != QLatin1String("starting") && m_state != QLatin1String("running"))
         return;
     const qint64 elapsed = m_started.elapsed();
-    if (!m_sawGame && !gamePids().isEmpty()) {
-        m_sawGame = true;
-        qInfo("Game process detected after %lld ms", qlonglong(elapsed));
-    }
-    if (m_sawGame && elapsed >= MinSplashMs) {
-        setState(QStringLiteral("running"));
+    const bool alive = !gamePids().isEmpty();
+    if (alive)
+        m_lastSeen = elapsed;
+
+    if (m_state == QLatin1String("starting")) {
+        if (alive) {
+            // Окно игры встаёт поверх оболочки — дальше нажатия геймпада идут только игре
+            m_sawGame = true;
+            qInfo("Game process detected after %lld ms", qlonglong(elapsed));
+            setState(QStringLiteral("running"));
+            return;
+        }
+        if (!m_slow && elapsed >= SlowMs) {
+            m_slow = true;
+            emit stateChanged();
+        }
+        if (elapsed >= (isSteam() ? SteamGiveUpMs : GiveUpMs)) {
+            qWarning("Game process not detected after %lld ms", qlonglong(elapsed));
+            if (isSteam()) {
+                fail(tr("Steam не запустил игру. Откройте Steam (Магазин → Steam → «Открыть Steam») и проверьте, не ждёт ли он подтверждения."));
+                return;
+            }
+            // Процесс Proton жив, а процесса игры не видно — убираем экран, игра, возможно, идёт
+            if (m_process && !m_processDone) {
+                setState(QStringLiteral("running"));
+                return;
+            }
+            fail(tr("Игра не запустилась."));
+        }
         return;
     }
-    if (!m_slow && elapsed >= SlowMs) {
-        m_slow = true;
-        emit stateChanged();
+
+    // Игра идёт: закончилась, когда её процессов нет несколько секунд подряд
+    // (а у GOG — ещё и процесс запуска вышел)
+    if (alive || (m_process && !m_processDone) || elapsed - m_lastSeen < GoneMs)
+        return;
+    qInfo("Game %s finished after %lld ms", qPrintable(m_game.value(QStringLiteral("id")).toString()), qlonglong(elapsed));
+    const bool quick = m_lastSeen < QuickExitMs && !m_stopping;
+    m_stopping = false;
+    const QString relaunch = std::exchange(m_relaunch, QString());
+    if (!relaunch.isEmpty()) {
+        setState(QStringLiteral("idle"));
+        launch(relaunch);
+        return;
     }
-    if (elapsed >= GiveUpMs) {
-        qWarning("Game process not detected after %lld ms, hiding the launch screen", qlonglong(elapsed));
-        setState(QStringLiteral("running"));
+    if (quick && !isSteam()) {
+        fail(tr("Игра закрылась сразу после запуска."));
+        return;
     }
+    setState(QStringLiteral("idle"));
 }
 
 QString GameLauncher::protonPath() const
@@ -157,7 +231,10 @@ void GameLauncher::launch(const QString &gameId)
     m_game = game;
     m_sawGame = false;
     m_stopping = false;
+    m_processDone = false;
+    m_lastSeen = 0;
     m_logFile.clear();
+    m_prefix.clear();
     // DualSense напрямую — только играм, которые официально его поддерживают; остальным
     // (и пока поддержка неизвестна) — контроллер Xbox: его понимают почти все игры
     const QVariantMap compat = StoreManager::instance()->compatibility(game.value(QStringLiteral("store")).toString(),
@@ -165,69 +242,118 @@ void GameLauncher::launch(const QString &gameId)
     m_inputMode = compat.value(QStringLiteral("ps5")).toBool() ? QStringLiteral("native") : QStringLiteral("xbox");
     setState(QStringLiteral("starting"), tr("Игра запускается…"));
 
-    const QString proton = protonPath();
-    if (proton.isEmpty()) {
+    const QString store = game.value(QStringLiteral("store")).toString();
+    const QString appId = game.value(QStringLiteral("appId")).toString();
+    if (store == QLatin1String("steam")) {
+        launchSteam(appId);
+        return;
+    }
+    if (store != QLatin1String("gog")) {
+        fail(tr("Запуск игр этого магазина пока не поддерживается."));
+        return;
+    }
+
+    m_proton = protonPath();
+    if (m_proton.isEmpty()) {
         fail(tr("Для запуска нужен Proton. Установите его: Настройки → Обновления."));
         return;
     }
-    const QString store = game.value(QStringLiteral("store")).toString();
-    const QString appId = game.value(QStringLiteral("appId")).toString();
-    const QString installPath = game.value(QStringLiteral("installPath")).toString();
+    // Proton — сценарий на Python
+    if (QStandardPaths::findExecutable(QStringLiteral("python3")).isEmpty()) {
+        fail(tr("Для запуска через Proton нужен Python 3. Установите системные компоненты: Настройки → Обновления."));
+        return;
+    }
     StoreManager *stores = StoreManager::instance();
-
-    if (store == QLatin1String("gog")) {
-        // gogdl сам знает, какой файл запускать; Proton — обёртка
-        start(stores->gogdlExecutable(),
-              {QStringLiteral("--auth-config-path"), stores->gogAuthConfig(), QStringLiteral("launch"), installPath, appId,
-               QStringLiteral("--platform"), QStringLiteral("windows"), QStringLiteral("--no-wine"),
-               QStringLiteral("--wrapper"), QLatin1Char('"') + proton + QStringLiteral("/proton\" run")},
-              installPath, QString());
+    if (!QFileInfo(stores->gogdlExecutable()).isExecutable()) {
+        fail(tr("Для запуска игр GOG нужен gogdl. Установите его: Настройки → Обновления."));
         return;
     }
-
-    if (store == QLatin1String("steam")) {
-        stores->steamLaunchInfo(appId, [this, proton, installPath, appId, gameId](const QVariantMap &info) {
-            if (m_game.value(QStringLiteral("id")).toString() != gameId || m_state != QLatin1String("starting"))
-                return;
-            const QString executable = info.value(QStringLiteral("executable")).toString();
-            if (executable.isEmpty()) {
-                fail(tr("Не удалось получить параметры запуска игры из Steam."));
-                return;
-            }
-            const QString exePath = QDir(installPath).filePath(executable);
-            if (!QFileInfo::exists(exePath)) {
-                fail(tr("Файл игры не найден: %1. Попробуйте переустановить игру.").arg(executable));
-                return;
-            }
-            const QString workingDir = info.value(QStringLiteral("workingdir")).toString();
-            QStringList args{QStringLiteral("run"), exePath};
-            args += QProcess::splitCommand(info.value(QStringLiteral("arguments")).toString());
-            start(proton + QStringLiteral("/proton"), args,
-                  workingDir.isEmpty() ? QFileInfo(exePath).absolutePath() : QDir(installPath).filePath(workingDir), appId);
-        });
-        return;
-    }
-
-    fail(tr("Запуск игр этого магазина пока не поддерживается."));
+    const QString installPath = game.value(QStringLiteral("installPath")).toString();
+    // gogdl сам знает, какой файл запускать; Proton — обёртка. waitforexitandrun: перед запуском
+    // дождаться, пока закроется прежний сеанс Wine этого префикса (после перезапуска игры)
+    start(stores->gogdlExecutable(),
+          {QStringLiteral("--auth-config-path"), stores->gogAuthConfig(), QStringLiteral("launch"), installPath, appId,
+           QStringLiteral("--platform"), QStringLiteral("windows"), QStringLiteral("--no-wine"),
+           QStringLiteral("--wrapper"), QLatin1Char('"') + m_proton + QStringLiteral("/proton\" waitforexitandrun")},
+          installPath);
 }
 
-void GameLauncher::start(const QString &program, const QStringList &args, const QString &workingDir, const QString &appIdForSteam)
+void GameLauncher::launchSteam(const QString &appId)
+{
+    // Настройки ввода — через обёртку запуска (её Steam вызывает вместо игры)
+    QMap<QString, QString> env;
+    if (m_inputMode == QLatin1String("native")) {
+        // Игра поддерживает DualSense — отдаём его напрямую (hidraw): вибрация, сенсоры, значки кнопок
+        env.insert(QStringLiteral("PROTON_ENABLE_HIDRAW"), QStringLiteral("1"));
+    } else {
+        // Система раскладки: игра видит только виртуальный контроллер Xbox оболочки
+        env.insert(QStringLiteral("PROTON_ENABLE_HIDRAW"), QStringLiteral("0"));
+        env.insert(QStringLiteral("SDL_GAMECONTROLLER_IGNORE_DEVICES"), kSonyPads);
+        env.insert(QStringLiteral("SDL_JOYSTICK_HIDAPI_PS5"), QStringLiteral("0"));
+        env.insert(QStringLiteral("SDL_JOYSTICK_HIDAPI_PS4"), QStringLiteral("0"));
+    }
+    env.insert(QStringLiteral("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS"), QStringLiteral("0"));
+
+    const QString profile = AccountManager::instance()->profileDir();
+    m_logFile = profile.isEmpty() ? QString() : profile + QStringLiteral("/logs/steam.log");
+    const QString gameId = m_game.value(QStringLiteral("id")).toString();
+    m_started.start();
+    startWatch();
+    qInfo("Launching steam:%s via the Steam client", qPrintable(appId));
+    StoreManager::instance()->steam()->launch(appId, env, [this, gameId](bool ok, const QString &error) {
+        if (m_game.value(QStringLiteral("id")).toString() != gameId || m_state != QLatin1String("starting"))
+            return;
+        if (!ok) {
+            fail(error);
+            return;
+        }
+        // Клиент принял команду — отсчёт ожидания процесса игры заново
+        m_started.restart();
+    });
+}
+
+void GameLauncher::startWatch()
+{
+    if (!m_watch) {
+        m_watch = new QTimer(this);
+        m_watch->setInterval(1000);
+        connect(m_watch, &QTimer::timeout, this, &GameLauncher::checkStarted);
+    }
+    m_watch->start();
+}
+
+void GameLauncher::start(const QString &program, const QStringList &args, const QString &workingDir)
 {
     const QString store = m_game.value(QStringLiteral("store")).toString();
     const QString appId = m_game.value(QStringLiteral("appId")).toString();
+    const QString installPath = m_game.value(QStringLiteral("installPath")).toString();
     const QString profile = AccountManager::instance()->profileDir();
     const QString key = store + QLatin1Char('_') + appId;
 
     // Свой префикс Wine у каждой игры каждого пользователя
-    const QString prefix = profile + QStringLiteral("/prefixes/") + key;
-    const QString steamHome = profile + QStringLiteral("/stores/steam/home");
-    QDir().mkpath(prefix);
-    QDir().mkpath(steamHome);
+    m_prefix = profile + QStringLiteral("/prefixes/") + key;
+    // Proton проверяет, что каталог «клиента Steam» существует; настоящий клиент ему не нужен
+    const QString clientDir = profile + QStringLiteral("/prefixes/.client");
+    QDir().mkpath(m_prefix);
+    QDir().mkpath(clientDir);
     QDir().mkpath(profile + QStringLiteral("/logs"));
 
     QProcessEnvironment env = StoreManager::instance()->storeEnvironment(store);
-    env.insert(QStringLiteral("STEAM_COMPAT_DATA_PATH"), prefix);
-    env.insert(QStringLiteral("STEAM_COMPAT_CLIENT_INSTALL_PATH"), steamHome);
+    env.insert(QStringLiteral("STEAM_COMPAT_DATA_PATH"), m_prefix);
+    env.insert(QStringLiteral("STEAM_COMPAT_CLIENT_INSTALL_PATH"), clientDir);
+    env.insert(QStringLiteral("STEAM_COMPAT_INSTALL_PATH"), installPath);
+    env.insert(QStringLiteral("STEAM_COMPAT_SHADER_PATH"), m_prefix + QStringLiteral("/shadercache"));
+    // Исправления GE-Proton для конкретных игр (protonfixes) ищут игру по магазину и id
+    env.insert(QStringLiteral("STORE"), QStringLiteral("gog"));
+    env.insert(QStringLiteral("SteamAppId"), QStringLiteral("0"));
+    env.insert(QStringLiteral("SteamGameId"), QStringLiteral("0"));
+    // Игры SDL не сворачиваются, когда поверх открывается оверлей оболочки
+    env.insert(QStringLiteral("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS"), QStringLiteral("0"));
+    // Переменные Qt оболочки игре не нужны (QT_QPA_PLATFORM ломает игры на Qt)
+    for (const QString &name : env.keys()) {
+        if (name.startsWith(QLatin1String("QT_")))
+            env.remove(name);
+    }
     if (m_inputMode == QLatin1String("native")) {
         // Игра поддерживает DualSense — отдаём его напрямую (hidraw): вибрация, сенсоры, значки кнопок
         env.insert(QStringLiteral("PROTON_ENABLE_HIDRAW"), QStringLiteral("1"));
@@ -235,18 +361,15 @@ void GameLauncher::start(const QString &program, const QStringList &args, const 
         // Система раскладки: игра видит только виртуальный контроллер Xbox, настоящие геймпады
         // Sony от неё спрятаны (их события и так захвачены оболочкой)
         env.insert(QStringLiteral("PROTON_ENABLE_HIDRAW"), QStringLiteral("0"));
-        env.insert(QStringLiteral("SDL_GAMECONTROLLER_IGNORE_DEVICES"),
-                   QStringLiteral("0x054c/0x0ce6,0x054c/0x0df2,0x054c/0x05c4,0x054c/0x09cc"));
+        env.insert(QStringLiteral("SDL_GAMECONTROLLER_IGNORE_DEVICES"), kSonyPads);
+        env.insert(QStringLiteral("SDL_JOYSTICK_HIDAPI_PS5"), QStringLiteral("0"));
+        env.insert(QStringLiteral("SDL_JOYSTICK_HIDAPI_PS4"), QStringLiteral("0"));
     }
     // В сессии с cage игры идут через Wayland-драйвер Wine, без Xwayland:
     // на окнах Xwayland cage падает и уносит с собой всю сессию
     if (qEnvironmentVariable("REDANCHOR_SESSION_COMPOSITOR") == QLatin1String("cage")) {
         env.insert(QStringLiteral("PROTON_ENABLE_WAYLAND"), QStringLiteral("1"));
         env.remove(QStringLiteral("DISPLAY"));
-    }
-    if (!appIdForSteam.isEmpty()) {
-        env.insert(QStringLiteral("SteamAppId"), appIdForSteam);
-        env.insert(QStringLiteral("SteamGameId"), appIdForSteam);
     }
 
     m_process = new QProcess(this);
@@ -257,63 +380,64 @@ void GameLauncher::start(const QString &program, const QStringList &args, const 
     m_process->setStandardOutputFile(log, QIODevice::Truncate);
 
     m_logFile = log;
-    connect(m_process, &QProcess::finished, this, [this, log](int exitCode, QProcess::ExitStatus status) {
-        m_process->deleteLater();
+    QProcess *process = m_process;
+    connect(process, &QProcess::finished, this, [this, process](int exitCode, QProcess::ExitStatus status) {
+        process->deleteLater();
+        if (m_process != process)
+            return;
         m_process = nullptr;
+        m_processDone = true;
         const qint64 elapsed = m_started.elapsed();
-        qInfo("Game %s finished: exit %d after %lld ms, game process %s",
+        qInfo("Game launcher %s finished: exit %d after %lld ms, game process %s",
               qPrintable(m_game.value(QStringLiteral("id")).toString()), exitCode, qlonglong(elapsed),
               m_sawGame ? "seen" : "never seen");
-        if (m_state == QLatin1String("idle"))
+        if (m_state == QLatin1String("idle") || m_state == QLatin1String("failed"))
             return;   // запуск отменили
-        // Игру закрыли из оверлея (или перезапускают) — это не ошибка
-        if (m_stopping) {
-            m_stopping = false;
-            setState(QStringLiteral("idle"));
-            const QString relaunch = std::exchange(m_relaunch, QString());
-            if (!relaunch.isEmpty())
-                launch(relaunch);
-            return;
-        }
         // Процесс игры так и не появился — игра не запустилась, даже если Proton вышел с кодом 0
-        if (!m_sawGame && m_state == QLatin1String("starting")) {
-            fail(tr("Игра не запустилась."));
+        if (!m_sawGame && m_state == QLatin1String("starting") && gamePids().isEmpty() && !m_stopping) {
+            fail(status != QProcess::NormalExit || exitCode != 0 ? tr("Игра закрылась с ошибкой при запуске.")
+                                                                  : tr("Игра не запустилась."));
             return;
         }
-        if (elapsed < QuickExitMs && (status != QProcess::NormalExit || exitCode != 0)) {
-            fail(tr("Игра закрылась с ошибкой сразу после запуска."));
-            return;
-        }
-        setState(QStringLiteral("idle"));
+        // Дальше за игрой следит checkStarted: она могла остаться работать после выхода лаунчера
+        checkStarted();
     });
-    connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart || !m_process)
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart || m_process != process)
             return;
-        m_process->deleteLater();
+        process->deleteLater();
         m_process = nullptr;
+        m_processDone = true;
         fail(tr("Не удалось запустить игру."));
     });
 
     qInfo("Launching %s: %s %s", qPrintable(key), qPrintable(program), qPrintable(args.join(QLatin1Char(' '))));
     m_started.start();
     m_process->start(program, args);
-
-    // Экран запуска держим, пока не появится процесс самой игры
-    if (!m_watch) {
-        m_watch = new QTimer(this);
-        m_watch->setInterval(1000);
-        connect(m_watch, &QTimer::timeout, this, &GameLauncher::checkStarted);
-    }
-    m_watch->start();
+    startWatch();
 }
 
 void GameLauncher::killGame()
 {
-    // Процессы игры (Wine) живут отдельно от Proton — завершаем и их
-    for (qint64 pid : gamePids())
-        QProcess::execute(QStringLiteral("kill"), {QStringLiteral("-9"), QString::number(pid)});
+    QList<qint64> pids = gamePids();
+    if (!isSteam() && !m_prefix.isEmpty() && !m_proton.isEmpty()) {
+        // Всё, что живёт в префиксе игры (лаунчеры, службы Wine), закрывает сам wineserver
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("WINEPREFIX"), m_prefix + QStringLiteral("/pfx"));
+        QProcess wineserver;
+        wineserver.setProcessEnvironment(env);
+        wineserver.start(m_proton + QStringLiteral("/files/bin/wineserver"), {QStringLiteral("-k")});
+        wineserver.waitForFinished(3000);
+    }
+    // Сначала просим закрыться, через пару секунд — завершаем принудительно
+    signalAll(pids, SIGTERM);
     if (m_process)
-        m_process->kill();
+        m_process->terminate();
+    QTimer::singleShot(2500, this, [this, pids] {
+        signalAll(pids, SIGKILL);
+        if (m_process)
+            m_process->kill();
+    });
 }
 
 void GameLauncher::cancel()
@@ -321,8 +445,8 @@ void GameLauncher::cancel()
     if (m_state != QLatin1String("starting"))
         return;
     qInfo("Launch cancelled");
-    setState(QStringLiteral("idle"));
     killGame();
+    setState(QStringLiteral("idle"));
 }
 
 void GameLauncher::stop()
@@ -330,18 +454,25 @@ void GameLauncher::stop()
     if (m_state != QLatin1String("starting") && m_state != QLatin1String("running"))
         return;
     qInfo("Game stop requested");
-    if (!m_process) {
-        setState(QStringLiteral("idle"));
+    if (m_state == QLatin1String("starting")) {
+        // Игра ещё не появилась — просто отменяем запуск (перезапуск — чуть позже,
+        // когда процессы прежнего запуска закроются)
+        cancel();
+        const QString relaunch = std::exchange(m_relaunch, QString());
+        if (!relaunch.isEmpty())
+            QTimer::singleShot(3000, this, [this, relaunch] { launch(relaunch); });
         return;
     }
     m_stopping = true;
     killGame();
+    // checkStarted уберёт экран, когда процессы игры закроются
+    startWatch();
 }
 
 void GameLauncher::restart()
 {
     const QString id = m_game.value(QStringLiteral("id")).toString();
-    if (id.isEmpty() || !m_process) {
+    if (id.isEmpty()) {
         stop();
         return;
     }

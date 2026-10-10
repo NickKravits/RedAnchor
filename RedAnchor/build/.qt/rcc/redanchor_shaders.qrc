@@ -1,6 +1,0 @@
-<RCC>
-  <qresource prefix="/qt/qml/RedAnchor">
-    <file alias="shaders/aurora.frag.qsb">/home/dev/RedAnchor/RedAnchor/build/.qsb/shaders/aurora.frag.qsb</file>
-  </qresource>
-</RCC>
-

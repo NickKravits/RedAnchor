@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QStorageInfo>
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -213,6 +214,56 @@ void GameLibrary::addInstalled(const QString &store, const QString &appId, const
     emit storageChanged();
     if (sizeBytes <= 0)
         refreshStorage();
+}
+
+void GameLibrary::syncStore(const QString &store, const QList<StoreGame> &installed, const QStringList &pending)
+{
+    if (libraryFile().isEmpty())
+        return;
+    bool changed = false;
+    QSet<QString> present;
+    for (const StoreGame &entry : installed) {
+        present.insert(entry.appId);
+        Game g;
+        g.store = store;
+        g.appId = entry.appId;
+        const int index = indexOf(g.id());
+        if (index >= 0) {
+            Game &existing = m_games[index];
+            if (existing.installed && existing.installPath == entry.path && existing.title == entry.title)
+                continue;
+            if (!existing.installed)
+                existing.installedAt = QDateTime::currentSecsSinceEpoch();
+            existing.installed = true;
+            existing.installPath = entry.path;
+            existing.title = entry.title;
+            if (entry.sizeBytes > 0)
+                existing.sizeBytes = entry.sizeBytes;
+        } else {
+            g.title = entry.title;
+            g.installed = true;
+            g.installPath = entry.path;
+            g.sizeBytes = entry.sizeBytes;
+            g.installedAt = QDateTime::currentSecsSinceEpoch();
+            m_games.append(g);
+        }
+        changed = true;
+    }
+    for (int i = int(m_games.size()) - 1; i >= 0; --i) {
+        const Game &g = m_games.at(i);
+        if (g.store != store || present.contains(g.appId))
+            continue;
+        // Удалили через клиент магазина или загрузка больше не идёт
+        if (g.installed || !pending.contains(g.appId)) {
+            m_games.removeAt(i);
+            changed = true;
+        }
+    }
+    if (!changed)
+        return;
+    save();
+    emit gamesChanged();
+    refreshStorage();
 }
 
 void GameLibrary::removeRecord(const QString &id)

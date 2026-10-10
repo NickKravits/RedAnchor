@@ -1,2 +1,0 @@
-/home/dev/RedAnchor/RedAnchor/build/steam-helper/redanchor-steam.pdb
-/home/dev/RedAnchor/RedAnchor/build/steam-helper/redanchor-steam

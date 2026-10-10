@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/home/dev/RedAnchor/RedAnchor/build/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

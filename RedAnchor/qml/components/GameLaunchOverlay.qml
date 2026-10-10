@@ -41,11 +41,14 @@ FocusScope {
             returnFocus = null
         }
     }
+    readonly property bool steamGame: game && game.store === "steam"
     Keys.onPressed: (event) => {
         if (root.failed && (event.key === Qt.Key_Escape || event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
             GameLauncher.dismiss()
         else if (!root.failed && event.key === Qt.Key_Escape)
             GameLauncher.cancel()
+        else if (root.steamGame && !root.running && event.key === Qt.Key_Space)
+            StoreManager.openSteam()   // Steam ждёт подтверждения (соглашение, выбор режима запуска)
         event.accepted = true
     }
 
@@ -63,7 +66,7 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        color: "#05070d"
+        color: "#0a0b0d"
     }
     Image {
         anchors.fill: parent
@@ -77,9 +80,9 @@ FocusScope {
         anchors.fill: parent
         gradient: Gradient {
             orientation: Gradient.Horizontal
-            GradientStop { position: 0.0; color: Qt.rgba(0.01, 0.02, 0.05, 0.92) }
-            GradientStop { position: 0.6; color: Qt.rgba(0.01, 0.02, 0.05, 0.6) }
-            GradientStop { position: 1.0; color: Qt.rgba(0.01, 0.02, 0.05, 0.85) }
+            GradientStop { position: 0.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.92) }
+            GradientStop { position: 0.6; color: Qt.rgba(0.02, 0.022, 0.026, 0.6) }
+            GradientStop { position: 1.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.85) }
         }
     }
 
@@ -183,7 +186,9 @@ FocusScope {
             visible: !root.failed && !root.running && GameLauncher.slow
             width: parent.width
             wrapMode: Text.WordWrap
-            text: qsTr("Запуск идёт дольше обычного: первый запуск игры через Proton может занять пару минут.")
+            text: root.steamGame
+                  ? qsTr("Запуск идёт дольше обычного: перед первым запуском Steam ставит Proton и готовит игру — это может занять несколько минут.")
+                  : qsTr("Запуск идёт дольше обычного: первый запуск игры через Proton может занять пару минут.")
             color: Theme.textSecondary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSmall
@@ -192,6 +197,7 @@ FocusScope {
         GlyphText {
             text: root.failed ? qsTr("{circle} — закрыть")
                   : root.running ? qsTr("{ps} — меню: закрыть игру, громкость, питание")
+                  : root.steamGame && GameLauncher.slow ? qsTr("{circle} — отменить запуск, {triangle} — открыть Steam")
                   : qsTr("{circle} — отменить запуск")
             color: Theme.textSecondary
             pixelSize: Theme.fontSmall

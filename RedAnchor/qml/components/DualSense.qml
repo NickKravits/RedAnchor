@@ -401,7 +401,7 @@ Item {
                         // Непрозрачная заливка: сетка фона и кабель не просвечивают
                         ShapePath {
                             strokeColor: "transparent"
-                            fillColor: "#050a1b"   // в тон фону, но непрозрачно
+                            fillColor: "#1c1f24"   // в тон фону, но непрозрачно
                             PathSvg { path: root.bodyPath }
                             PathSvg { path: root.bumperPath }
                         }

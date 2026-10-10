@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFocusEvent>
 #include <QSettings>
 #include <QGuiApplication>
 #include <QKeyEvent>
@@ -153,6 +154,10 @@ GamepadManager::~GamepadManager()
         delete dev.notifier;
         ::close(dev.fd);
     }
+    for (const Touchpad &pad : std::as_const(m_touchpads)) {
+        delete pad.notifier;
+        ::close(pad.fd);
+    }
 }
 
 bool GamepadManager::dualSense() const
@@ -301,7 +306,9 @@ void GamepadManager::rescan()
         if (m_ignored.contains(path))
             continue;
         const bool known = std::any_of(m_devices.cbegin(), m_devices.cend(),
-                                       [&](const Device &d) { return d.path == path; });
+                                       [&](const Device &d) { return d.path == path; })
+                           || std::any_of(m_touchpads.cbegin(), m_touchpads.cend(),
+                                          [&](const Touchpad &t) { return t.path == path; });
         if (!known)
             openDevice(path);
     }
@@ -319,6 +326,8 @@ void GamepadManager::openDevice(const QString &path)
 
     unsigned long keyBits[(KEY_MAX + BitsPerLong) / BitsPerLong] = {};
     if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(keyBits)), keyBits) < 0 || !testBit(keyBits, BTN_GAMEPAD)) {
+        if (grabTouchpad(fd, path))
+            return;
         ::close(fd);
         m_ignored.insert(path);
         return;
@@ -397,6 +406,61 @@ void GamepadManager::openDevice(const QString &path)
     emit gamepadConnected(displayName(dev), connectionName(dev));
     // Драйвер регистрирует батарею чуть позже узла input
     QTimer::singleShot(2000, this, &GamepadManager::pollBattery);
+}
+
+bool GamepadManager::grabTouchpad(int fd, const QString &path)
+{
+    input_id id = {};
+    if (ioctl(fd, EVIOCGID, &id) < 0 || id.vendor != SonyVendor)
+        return false;
+    unsigned long propBits[(INPUT_PROP_MAX + BitsPerLong) / BitsPerLong] = {};
+    unsigned long absBits[(ABS_MAX + BitsPerLong) / BitsPerLong] = {};
+    ioctl(fd, EVIOCGPROP(sizeof(propBits)), propBits);
+    ioctl(fd, EVIOCGBIT(EV_ABS, sizeof(absBits)), absBits);
+    // Тачпад: указатель или «кнопочная панель» с координатами касаний.
+    // Датчики движения (INPUT_PROP_ACCELEROMETER) курсор не двигают — их не трогаем.
+    const bool touchpad = !testBit(propBits, INPUT_PROP_ACCELEROMETER)
+                          && (testBit(propBits, INPUT_PROP_POINTER) || testBit(propBits, INPUT_PROP_BUTTONPAD))
+                          && testBit(absBits, ABS_MT_POSITION_X);
+    if (!touchpad)
+        return false;
+    if (ioctl(fd, EVIOCGRAB, 1) < 0) {
+        qWarning("Gamepad touchpad %s: EVIOCGRAB failed", qPrintable(path));
+        return false;
+    }
+    Touchpad pad;
+    pad.fd = fd;
+    pad.path = path;
+    pad.notifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
+    // События тачпада просто вычитываем: курсор от них больше не двигается
+    connect(pad.notifier, &QSocketNotifier::activated, this, [this, fd] {
+        input_event events[64];
+        for (;;) {
+            const ssize_t n = ::read(fd, events, sizeof(events));
+            if (n > 0)
+                continue;
+            if (n < 0 && (errno == EAGAIN || errno == EINTR))
+                return;
+            closeTouchpad(fd);   // отключили
+            return;
+        }
+    });
+    m_touchpads.append(pad);
+    qInfo("Gamepad touchpad grabbed: %s", qPrintable(path));
+    return true;
+}
+
+void GamepadManager::closeTouchpad(int fd)
+{
+    for (int i = 0; i < m_touchpads.size(); ++i) {
+        if (m_touchpads.at(i).fd != fd)
+            continue;
+        Touchpad pad = m_touchpads.takeAt(i);
+        pad.notifier->setEnabled(false);
+        pad.notifier->deleteLater();
+        ::close(pad.fd);
+        return;
+    }
 }
 
 // Батарея геймпада в /sys/class/power_supply: у DualSense она называется
@@ -780,6 +844,16 @@ void GamepadManager::sendKey(int key, bool press, bool autoRepeat)
     QWindow *window = targetWindow();
     if (!window)
         return;
+    // Окно не в фокусе (только что закрылось другое окно, а композитор не вернул фокус) —
+    // Qt Quick тогда не отдаёт клавиши ни одному элементу, и геймпад «перестаёт работать».
+    // Просим фокус у композитора, а если фокуса нет ни у одного окна — возвращаем его сразу
+    if (press && QGuiApplication::focusWindow() != window) {
+        window->requestActivate();
+        if (!QGuiApplication::focusWindow()) {
+            QFocusEvent focusIn(QEvent::FocusIn, Qt::ActiveWindowFocusReason);
+            QCoreApplication::sendEvent(window, &focusIn);
+        }
+    }
     QCoreApplication::postEvent(window, new QKeyEvent(press ? QEvent::KeyPress : QEvent::KeyRelease, key,
                                                       Qt::NoModifier, QString(), autoRepeat));
 }

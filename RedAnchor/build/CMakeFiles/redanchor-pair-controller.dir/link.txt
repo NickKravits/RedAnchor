@@ -1,1 +1,0 @@
-/usr/bin/c++ -Wl,--dependency-file=CMakeFiles/redanchor-pair-controller.dir/link.d "CMakeFiles/redanchor-pair-controller.dir/redanchor-pair-controller_autogen/mocs_compilation.cpp.o" "CMakeFiles/redanchor-pair-controller.dir/src/pairhelper/main.cpp.o" -o redanchor-pair-controller  -Wl,-rpath,::::::::::::::::::::::

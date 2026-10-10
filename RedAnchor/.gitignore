@@ -1,0 +1,5 @@
+# Каталоги сборки и файлы IDE
+build/
+build-*/
+.qtcreator/
+*.user

@@ -1,51 +1,235 @@
 #!/bin/bash
 # redanchor-components — установка системных компонентов RedAnchor (Ubuntu / Debian).
-# Запускается от root через pkexec (правило polkit: data/org.redanchor.shell.policy.in).
+# Запускается от root через pkexec (правило polkit: data/org.redanchor.shell.policy.in)
+# и из install.sh (sudo bash data/redanchor-components <цель>).
 #
-#   redanchor-components vulkan    — загрузчик Vulkan и драйверы Mesa Vulkan (64 и 32 бита)
+#   redanchor-components system    — всё для сессии: gamescope (и cage как запасной вариант),
+#                                    Xwayland, libxcb-cursor0 (Qt внутри gamescope), Python 3
+#                                    (на нём написан Proton), PipeWire/WirePlumber (громкость),
+#                                    шрифт Inter, BlueZ, NetworkManager
 #   redanchor-components drivers   — графический драйвер: NVIDIA (ubuntu-drivers / nvidia-driver)
 #                                    или Mesa для AMD и Intel (64 и 32 бита) с прошивками
+#   redanchor-components vulkan    — загрузчик Vulkan и драйверы Mesa Vulkan (64 и 32 бита)
+#   redanchor-components steam     — официальный клиент Steam (steam-installer из multiverse/contrib,
+#                                    иначе steam_latest.deb с repo.steampowered.com), steam-devices
+#                                    и 32-битные библиотеки. Дальше Steam обновляется сам.
 #
 # Вывод для оболочки: «PROGRESS <0..100> <текст>» и «REBOOT», если нужна перезагрузка.
 # Остальной вывод apt уходит в stderr (журнал оболочки).
 
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+export LC_ALL=C.UTF-8 2>/dev/null || true
+
+STEAM_DEB_URL="https://repo.steampowered.com/steam/archive/stable/steam_latest.deb"
+# Сколько секунд ждать, пока dpkg занят другим процессом (например, unattended-upgrades)
+LOCK_TIMEOUT=600
+APT_OPTS=(-q -o "DPkg::Lock::Timeout=${LOCK_TIMEOUT}"
+          -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+# Отметка о недавнем apt-get update (в /run — сбрасывается при перезагрузке)
+UPDATE_STAMP=/run/redanchor-apt-updated
+
+# Диапазон прогресса для apt_install: от PSTART до PEND
+PSTART=10
+PEND=99
+SOURCES_CHANGED=0
 
 progress() { echo "PROGRESS $1 $2"; }
+log() { echo "redanchor-components: $*" >&2; }
 
-# 32-битные библиотеки нужны Proton для старых игр
+if [[ $(id -u) -ne 0 ]]; then
+    echo "redanchor-components: нужны права root (pkexec или sudo)" >&2
+    exit 1
+fi
+if ! command -v apt-get >/dev/null 2>&1; then
+    echo "redanchor-components: нужна система на базе Ubuntu или Debian (apt)" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC1091
+. /etc/os-release
+DISTRO_ID="${ID:-}"
+DISTRO_LIKE="${ID_LIKE:-}"
+CODENAME="${VERSION_CODENAME:-${UBUNTU_CODENAME:-}}"
+
+is_ubuntu() { [[ $DISTRO_ID == ubuntu || $DISTRO_LIKE == *ubuntu* ]]; }
+is_debian() { ! is_ubuntu && [[ $DISTRO_ID == debian || $DISTRO_LIKE == *debian* ]]; }
+
+# 32-битные библиотеки нужны Steam и Proton для старых игр
 ensure_i386() {
     if ! dpkg --print-foreign-architectures | grep -qx i386; then
         progress 2 "Включение 32-битных пакетов"
         dpkg --add-architecture i386
+        SOURCES_CHANGED=1
     fi
 }
 
+# Прерванная установка (выключили питание посреди apt) — доделываем
+repair_dpkg() {
+    dpkg --configure -a >&2 || log "dpkg --configure -a завершился с ошибкой"
+}
+
 apt_update() {
+    # Список пакетов свежий и источники не менялись — не тратим время
+    if [[ $SOURCES_CHANGED -eq 0 && -f $UPDATE_STAMP ]] &&
+       [[ -z $(find "$UPDATE_STAMP" -mmin +30 2>/dev/null) ]] &&
+       [[ -z $(find /etc/apt/sources.list /etc/apt/sources.list.d -newer "$UPDATE_STAMP" 2>/dev/null) ]]; then
+        return 0
+    fi
     progress 5 "Обновление списка пакетов"
-    apt-get update -q >&2
+    local attempt
+    for attempt in 1 2 3; do
+        if apt-get update "${APT_OPTS[@]}" >&2; then
+            touch "$UPDATE_STAMP"
+            SOURCES_CHANGED=0
+            return 0
+        fi
+        log "apt-get update: попытка $attempt не удалась"
+        sleep 15
+    done
+    # Часть зеркал недоступна — ставим из того, что есть
+    log "список пакетов обновлён не полностью"
+    return 0
+}
+
+# Есть ли пакет в репозиториях (виртуальные и неизвестные — нет)
+pkg_available() {
+    apt-cache show --no-all-versions "$1" 2>/dev/null | grep -q '^Package:'
+}
+
+pkg_installed() {
+    [[ $(dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null) == ii* ]]
 }
 
 # apt-get install с прогрессом: APT::Status-Fd выдаёт строки dlstatus/pmstatus
 apt_install() {
-    apt-get install -y -q \
-        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
-        -o APT::Status-Fd=3 "$@" 3>&1 1>&2 |
+    local span=$((PEND - PSTART))
+    apt-get install -y "${APT_OPTS[@]}" -o APT::Status-Fd=3 "$@" 3>&1 1>&2 |
     while IFS=: read -r kind item pct _; do
         p=${pct%%.*}
-        p=${p:-0}
+        [[ $p =~ ^[0-9]+$ ]] || p=0
         case "$kind" in
-            dlstatus) progress $((10 + p / 2)) "Загрузка пакетов" ;;
-            pmstatus) progress $((60 + p * 39 / 100)) "Установка: ${item}" ;;
+            dlstatus) progress $((PSTART + p * span * 4 / 1000)) "Загрузка пакетов" ;;
+            pmstatus) progress $((PSTART + span * 4 / 10 + p * span * 6 / 1000)) "Установка: ${item}" ;;
         esac
     done
     return "${PIPESTATUS[0]}"
 }
 
+# Установка обязательных пакетов: при ошибке чиним зависимости и пробуем ещё раз
+apt_install_required() {
+    if apt_install "$@"; then
+        return 0
+    fi
+    log "установка не удалась, исправляем зависимости и повторяем"
+    repair_dpkg
+    apt-get install -f -y "${APT_OPTS[@]}" >&2 || true
+    apt_install "$@"
+}
+
+# Необязательные пакеты: только те, что есть в репозиториях и ещё не стоят;
+# ошибка не прерывает установку
+apt_install_optional() {
+    local pkgs=() pkg
+    for pkg in "$@"; do
+        pkg_installed "$pkg" && continue
+        if pkg_available "$pkg"; then
+            pkgs+=("$pkg")
+        else
+            log "пакета $pkg нет в репозиториях — пропускаем"
+        fi
+    done
+    [[ ${#pkgs[@]} -eq 0 ]] && return 0
+    if ! apt_install "${pkgs[@]}"; then
+        # По одному: один сломанный пакет не мешает остальным
+        for pkg in "${pkgs[@]}"; do
+            apt_install "$pkg" || log "не удалось установить $pkg"
+        done
+    fi
+    return 0
+}
+
+# Включить компонент репозитория (universe, multiverse, contrib, non-free, non-free-firmware)
+# в официальных источниках дистрибутива. Сторонние репозитории (PPA и т.п.) не трогаем.
+enable_component() {
+    local comp="$1"
+    if is_ubuntu && command -v add-apt-repository >/dev/null 2>&1; then
+        if add-apt-repository -y -n "$comp" >&2 2>/dev/null || add-apt-repository -y "$comp" >&2; then
+            SOURCES_CHANGED=1
+            return 0
+        fi
+    fi
+    [[ -n $CODENAME ]] || { log "неизвестно кодовое имя дистрибутива, $comp не включён"; return 0; }
+    local file changed=0 tmpf
+    tmpf=$(mktemp)
+    # Формат deb822 (*.sources): дописываем компонент в Components:, если Suites: — наш выпуск
+    for file in /etc/apt/sources.list.d/*.sources; do
+        [[ -f $file ]] || continue
+        if awk -v comp="$comp" -v code="$CODENAME" '
+            function flush(   i, ours) {
+                ours = (suites ~ ("(^|[ \t])" code "(-[a-z]+)?([ \t]|$)")) && uris !~ /launchpad|ppa/
+                for (i = 1; i <= n; i++) {
+                    if (ours && buf[i] ~ /^Components:/ && (" " buf[i] " ") !~ (" " comp " ")) {
+                        buf[i] = buf[i] " " comp; changed = 1
+                    }
+                    print buf[i]
+                }
+                n = 0; suites = ""; uris = ""
+            }
+            /^[ \t]*$/ { flush(); print; next }
+            { buf[++n] = $0 }
+            /^Suites:/ { suites = $0 }
+            /^URIs:/ { uris = $0 }
+            END { flush(); exit changed ? 0 : 1 }
+        ' "$file" >"$tmpf"; then
+            backup_source "$file"
+            cat "$tmpf" >"$file"
+            changed=1
+        fi
+        : >"$tmpf"
+    done
+    # Однострочный формат: deb [опции] URI выпуск компоненты…
+    for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+        [[ -f $file ]] || continue
+        if awk -v comp="$comp" -v code="$CODENAME" '
+            {
+                line = $0
+                if ($1 == "deb" || $1 == "deb-src") {
+                    i = 2
+                    if ($2 ~ /^\[/) { while (i <= NF && $i !~ /\]$/) i++; i++ }
+                    uri = $i; suite = $(i + 1)
+                    if (suite ~ ("^" code "(-[a-z]+)?$") && uri !~ /launchpad|ppa/ && (" " $0 " ") !~ (" " comp " ")) {
+                        line = $0 " " comp; changed = 1
+                    }
+                }
+                print line
+            }
+            END { exit changed ? 0 : 1 }
+        ' "$file" >"$tmpf"; then
+            backup_source "$file"
+            cat "$tmpf" >"$file"
+            changed=1
+        fi
+        : >"$tmpf"
+    done
+    rm -f "$tmpf"
+    if [[ $changed -eq 1 ]]; then
+        log "включён компонент репозитория: $comp"
+        SOURCES_CHANGED=1
+    fi
+    return 0
+}
+
+# Копия файла источников перед правкой (не рядом: apt ругается на чужие файлы в sources.list.d)
+backup_source() {
+    mkdir -p /var/backups/redanchor
+    cp -a "$1" "/var/backups/redanchor/$(basename "$1").$(date +%Y%m%d%H%M%S)"
+}
+
 gpu_vendor() {
-    local vendor=""
+    local vendor="" dev
     for dev in /sys/bus/pci/devices/*; do
+        [[ -r $dev/class ]] || continue
         [[ $(cat "$dev/class") == 0x03* ]] || continue
         case $(cat "$dev/vendor") in
             0x10de) echo nvidia; return ;;
@@ -56,44 +240,153 @@ gpu_vendor() {
     echo "${vendor:-unknown}"
 }
 
-install_vulkan() {
+prepare() {
+    progress 1 "Подготовка"
+    repair_dpkg
     ensure_i386
+}
+
+# ---------- Цели ----------
+
+install_system() {
+    prepare
+    # gamescope и шрифт Inter в Ubuntu — в universe
+    if is_ubuntu; then
+        enable_component universe
+    fi
     apt_update
-    apt_install libvulkan1 libvulkan1:i386 mesa-vulkan-drivers mesa-vulkan-drivers:i386 vulkan-tools
+    PSTART=10 PEND=60
+    # Без этого оболочка не запустится или не запустит игры
+    apt_install_required python3 libxcb-cursor0
+    PSTART=60 PEND=99
+    local optional=(gamescope cage xwayland fonts-inter
+                    bluez network-manager polkitd pkexec policykit-1
+                    curl ca-certificates tar xz-utils unzip mesa-utils)
+    # Звук: PipeWire ставим, если нет ни wpctl, ни pactl (PulseAudio не трогаем)
+    if command -v wpctl >/dev/null 2>&1 || ! command -v pactl >/dev/null 2>&1; then
+        optional+=(pipewire pipewire-pulse wireplumber)
+    fi
+    apt_install_optional "${optional[@]}"
+    if ! command -v gamescope >/dev/null 2>&1 && [[ ! -x /usr/games/gamescope ]]; then
+        log "gamescope недоступен в репозиториях этой системы — сессия запустится в cage"
+    fi
+}
+
+install_vulkan() {
+    prepare
+    apt_update
+    PSTART=10 PEND=80
+    apt_install_required libvulkan1 libvulkan1:i386 mesa-vulkan-drivers mesa-vulkan-drivers:i386
+    PSTART=80 PEND=99
+    apt_install_optional vulkan-tools
 }
 
 install_drivers() {
-    ensure_i386
-    apt_update
+    prepare
     case "$(gpu_vendor)" in
         nvidia)
-            if command -v ubuntu-drivers >/dev/null 2>&1; then
+            if is_debian; then
+                enable_component contrib
+                enable_component non-free
+                enable_component non-free-firmware
+            elif is_ubuntu; then
+                enable_component restricted
+            fi
+            apt_update
+            if is_ubuntu; then
+                command -v ubuntu-drivers >/dev/null 2>&1 || apt_install_required ubuntu-drivers-common
                 progress 20 "Установка рекомендуемого драйвера NVIDIA"
                 ubuntu-drivers install >&2
             else
                 # Debian: драйвер из non-free
-                apt_install nvidia-driver firmware-misc-nonfree
+                PSTART=10 PEND=80
+                apt_install_required nvidia-driver
+                PSTART=80 PEND=95
+                apt_install_optional firmware-misc-nonfree nvidia-driver-libs:i386 nvidia-vulkan-icd:i386
             fi
-            # 32-битная часть драйвера для Proton
-            local ver
-            ver=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null |
-                  sed -n 's/^ii *nvidia-driver-\([0-9]\+\).*/\1/p' | sort -n | tail -1)
-            if [[ -n $ver ]]; then
-                apt_install "libnvidia-gl-${ver}:i386"
+            # 32-битная часть драйвера для Steam и Proton (Ubuntu: libnvidia-gl-<версия>[-server]:i386)
+            local pkg
+            pkg=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'nvidia-driver-*' 2>/dev/null |
+                  sed -n 's/^ii *nvidia-driver-\([0-9][0-9a-z-]*\)$/\1/p' | sed 's/-open$//' | sort -V | tail -1)
+            if [[ -n $pkg ]]; then
+                PSTART=95 PEND=99
+                apt_install_optional "libnvidia-gl-${pkg}:i386"
             fi
             echo REBOOT
             ;;
         *)
+            if is_debian; then
+                enable_component non-free-firmware
+            fi
+            apt_update
             local firmware=linux-firmware
-            apt-cache show linux-firmware >/dev/null 2>&1 || firmware=firmware-linux
-            apt_install libgl1-mesa-dri libgl1-mesa-dri:i386 mesa-va-drivers "$firmware"
+            pkg_available linux-firmware || firmware="firmware-linux"
+            PSTART=10 PEND=80
+            apt_install_required libgl1-mesa-dri libgl1-mesa-dri:i386 libgl1 libgl1:i386 libegl1
+            PSTART=80 PEND=99
+            apt_install_optional mesa-va-drivers "$firmware"
             ;;
     esac
 }
 
+install_steam() {
+    prepare
+    # Лицензия Steam: без ответа debconf установка в неинтерактивном режиме обрывается
+    local owner
+    for owner in steam steam-installer steam-launcher; do
+        echo "$owner steam/question select I AGREE" | debconf-set-selections 2>/dev/null || true
+        echo "$owner steam/license note " | debconf-set-selections 2>/dev/null || true
+        echo "$owner steam/purge note " | debconf-set-selections 2>/dev/null || true
+    done
+    if is_ubuntu; then
+        enable_component multiverse
+    elif is_debian; then
+        enable_component contrib
+    fi
+    apt_update
+
+    if pkg_installed steam-installer || pkg_installed steam-launcher || pkg_installed steam || pkg_installed steam:i386; then
+        log "клиент Steam уже установлен"
+    elif pkg_available steam-installer; then
+        PSTART=10 PEND=70
+        apt_install_required steam-installer
+    else
+        # Пакета нет в репозиториях — официальный steam_latest.deb от Valve
+        progress 10 "Загрузка клиента Steam с repo.steampowered.com"
+        command -v curl >/dev/null 2>&1 || apt_install_required curl ca-certificates
+        local tmp
+        tmp=$(mktemp -d /tmp/redanchor-steam.XXXXXX)
+        # shellcheck disable=SC2064
+        trap "rm -rf '$tmp'" EXIT
+        chmod 755 "$tmp"   # apt читает файл от пользователя _apt
+        curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
+        chmod 644 "$tmp/steam.deb"
+        PSTART=20 PEND=70
+        apt_install_required "$tmp/steam.deb"
+        # steam-launcher добавляет репозиторий Valve — оттуда steam-libs
+        SOURCES_CHANGED=1
+        apt_update
+    fi
+    # Правила udev для контроллеров (DualSense, Xbox, Steam Controller) и 32-битные библиотеки
+    PSTART=70 PEND=99
+    apt_install_optional steam-devices steam-libs-amd64 steam-libs-i386 \
+        libc6:i386 libgl1:i386 libgl1-mesa-dri:i386 libegl1:i386 libvulkan1:i386 \
+        mesa-vulkan-drivers:i386 libudev1:i386 libgbm1:i386 zenity xdg-utils
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload >&2 || true
+        udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc >&2 || true
+    fi
+    if ! command -v steam >/dev/null 2>&1 && [[ ! -x /usr/games/steam && ! -x /usr/bin/steam ]]; then
+        echo "redanchor-components: Steam не установился" >&2
+        exit 1
+    fi
+}
+
 case "${1:-}" in
-    vulkan) install_vulkan ;;
+    system) install_system ;;
     drivers) install_drivers ;;
-    *) echo "usage: redanchor-components vulkan|drivers" >&2; exit 1 ;;
+    vulkan) install_vulkan ;;
+    steam) install_steam ;;
+    *) echo "usage: redanchor-components system|drivers|vulkan|steam" >&2; exit 1 ;;
 esac
 progress 100 "Готово"

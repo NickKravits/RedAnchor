@@ -34,7 +34,7 @@ Item {
         width: row.implicitWidth + Theme.px(56)
         height: Theme.px(68)
         radius: height / 2
-        color: Qt.rgba(0.03, 0.05, 0.13, 0.92)
+        color: Qt.rgba(0.10, 0.11, 0.13, 0.92)
         border.width: 1
         border.color: Qt.rgba(1, 1, 1, 0.16)
 

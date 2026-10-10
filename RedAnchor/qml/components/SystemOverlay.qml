@@ -31,12 +31,7 @@ Window {
         content.current = 0
         content.opened = true
         hideTimer.stop()
-        if (mainWindow && !fullscreen) {
-            x = mainWindow.x
-            y = mainWindow.y
-            width = mainWindow.width
-            height = mainWindow.height
-        }
+        fitToScreen()
         if (fullscreen && !kiosk)
             showFullScreen()
         else
@@ -44,6 +39,32 @@ Window {
         raise()
         requestActivate()
         row.forceActiveFocus()
+    }
+    // Размер окна задаём заранее, до показа: иначе первый кадр рисуется в старом размере
+    // (по умолчанию 1280×720), и на экранах с другим соотношением сторон (1280×800,
+    // 1366×768, портретные) снизу видна полоса, пока композитор не пришлёт настоящий размер.
+    function fitToScreen() {
+        if (mainWindow && mainWindow.screen)
+            screen = mainWindow.screen
+        const s = screen
+        if (fullscreen || kiosk) {
+            // Полный экран: ровно по экрану, на котором оболочка
+            if (s && s.width > 0 && s.height > 0) {
+                x = s.virtualX
+                y = s.virtualY
+                width = s.width
+                height = s.height
+            } else if (mainWindow) {
+                width = mainWindow.width
+                height = mainWindow.height
+            }
+        } else if (mainWindow) {
+            // Окно: поверх главного окна, того же размера
+            x = mainWindow.x
+            y = mainWindow.y
+            width = mainWindow.width
+            height = mainWindow.height
+        }
     }
     function close() {
         if (!content.opened)
@@ -57,8 +78,8 @@ Window {
     color: "transparent"
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
     visible: false
-    width: 1280
-    height: 720
+    width: Screen.width > 0 ? Screen.width : 1280
+    height: Screen.height > 0 ? Screen.height : 720
 
     // Прячем окно после того, как содержимое погасло
     Timer {
@@ -66,8 +87,8 @@ Window {
         interval: Theme.animNormal
         onTriggered: {
             overlay.hide()
-            // Игры нет — возвращаем управление оболочке
-            if (GameLauncher.state !== "running" && overlay.mainWindow)
+            // Игры и Steam поверх нет — возвращаем управление оболочке
+            if (GameLauncher.state !== "running" && !overlay.steamShown && overlay.mainWindow)
                 overlay.mainWindow.requestActivate()
         }
     }
@@ -84,10 +105,14 @@ Window {
         overlay.artRevision
         return gameRunning && game && game.id ? GameArt.art(game.id, game.store, game.appId, game.title) : ({})
     }
+    readonly property string steamPhase: (StoreManager.stores.steam || {}).phase || ""
+    readonly property bool steamShown: steamPhase === "signin" || steamPhase === "bigpicture"
     readonly property var items: {
         const list = []
         if (gameRunning && game)
             list.push({ key: "game", title: game.title || qsTr("Игра") })
+        if (steamShown)
+            list.push({ key: "steam", title: qsTr("Steam") })
         list.push({ key: "sound", title: SystemControl.volume >= 0
                                          ? qsTr("Звук: %1%").arg(SystemControl.muted ? 0 : SystemControl.volume)
                                          : qsTr("Звук") })
@@ -127,9 +152,9 @@ Window {
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(0.01, 0.02, 0.04, 0.25) }
-                GradientStop { position: 0.55; color: Qt.rgba(0.01, 0.02, 0.04, 0.55) }
-                GradientStop { position: 1.0; color: Qt.rgba(0.01, 0.02, 0.04, 0.92) }
+                GradientStop { position: 0.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.25) }
+                GradientStop { position: 0.55; color: Qt.rgba(0.02, 0.022, 0.026, 0.55) }
+                GradientStop { position: 1.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.92) }
             }
         }
 
@@ -142,7 +167,8 @@ Window {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: label.top
             anchors.bottomMargin: Theme.px(24)
-            width: Theme.px(520)
+            // На узких экранах панель не шире окна
+            width: Math.min(Theme.px(520), overlay.width - 2 * Theme.px(24))
             height: panelContent.implicitHeight + Theme.px(48)
             radius: Theme.radius * 1.5
             color: Qt.rgba(0.07, 0.08, 0.1, 0.96)
@@ -158,6 +184,7 @@ Window {
                 implicitHeight: item ? item.implicitHeight : 0
                 sourceComponent: content.panel === "sound" ? soundPanel
                                  : content.panel === "game" ? gamePanel
+                                 : content.panel === "steam" ? steamPanel
                                  : content.panel === "power" ? powerPanel : null
                 onLoaded: item.forceActiveFocus()
             }
@@ -248,6 +275,7 @@ Window {
                                 size: Theme.px(40)
                                 lineWidth: 1.5
                                 name: tile.modelData.key === "game" ? "play"
+                                    : tile.modelData.key === "steam" ? "steam"
                                     : tile.modelData.key === "sound" ? (SystemControl.muted || SystemControl.volume === 0 ? "volumeMute" : "volume")
                                     : "power"
                             }
@@ -276,6 +304,15 @@ Window {
             actions: [
                 { text: qsTr("Закрыть игру"), icon: "close", run: () => { overlay.close(); GameLauncher.stop() } },
                 { text: qsTr("Перезапустить игру"), icon: "refresh", run: () => { overlay.close(); GameLauncher.restart() } }
+            ]
+        }
+    }
+    Component {
+        id: steamPanel
+        ActionList {
+            actions: [
+                { text: overlay.steamPhase === "signin" ? qsTr("Отменить вход в Steam") : qsTr("Вернуться в RedAnchor"),
+                  icon: "close", run: () => { overlay.close(); StoreManager.closeSteam() } }
             ]
         }
     }

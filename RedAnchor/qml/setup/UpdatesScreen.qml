@@ -3,7 +3,7 @@ import QtQuick
 import "ModelSync.js" as ModelSync
 
 // Шаг мастера «Проверка обновлений»: проверяем и устанавливаем компоненты для игр —
-// графический драйвер, Vulkan и Proton. При подключении к интернету установка
+// системные пакеты сессии, графический драйвер, Vulkan, клиент Steam, Proton и gogdl. При подключении к интернету установка
 // начинается сама; продолжить можно в любой момент — установка доделается в фоне.
 SetupPage {
     id: page
@@ -17,7 +17,7 @@ SetupPage {
         if (ComponentsManager.checking)
             return qsTr("Проверяем, какие компоненты нужны для игр…")
         if (ComponentsManager.busy)
-            return qsTr("Устанавливаем компоненты для игр. Это может занять несколько минут.")
+            return qsTr("Устанавливаем компоненты для игр. Это может занять несколько минут — Steam и драйверы большие.")
         if (!ComponentsManager.needsInstall)
             return qsTr("Всё необходимое для игр установлено.")
         if (!NetworkBackend.online)
@@ -57,7 +57,9 @@ SetupPage {
         anchors.bottomMargin: Theme.px(20)
         width: Math.min(parent.width, Theme.px(1100))
         spacing: Theme.px(12)
-        interactive: false
+        clip: true
+        // Компонентов шесть: на невысоком экране список прокручивается
+        interactive: contentHeight > height
         keyNavigationEnabled: true
         highlightMoveDuration: Theme.animFast
         model: items
@@ -79,6 +81,15 @@ SetupPage {
         width: list.width
         spacing: Theme.px(8)
 
+        Text {
+            visible: ComponentsManager.components.some(c => c.key === "steam" && c.status === "installed")
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: qsTr("Steam установлен. Войти в аккаунт можно позже — один раз, в Steam Big Picture.")
+            color: Theme.textSecondary
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSmall
+        }
         Text {
             visible: ComponentsManager.rebootRequired
             width: parent.width

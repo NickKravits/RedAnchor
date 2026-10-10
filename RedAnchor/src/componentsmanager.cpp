@@ -6,6 +6,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
+#include <QGuiApplication>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -14,14 +16,22 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <memory>
 
 namespace {
 
-const QUrl kProtonRelease(QStringLiteral("https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest"));
+const QString kProtonRepo = QStringLiteral("GloriousEggroll/proton-ge-custom");
 const QString kProtonPrefix = QStringLiteral("GE-Proton");
+// Каталог для распаковки нового Proton до проверки (точка — его не примут за установленный)
+const QString kProtonStaging = QStringLiteral(".redanchor-extract");
+
+// Тайм-ауты сети: запрос к API и простой загрузки без данных
+constexpr int kApiTimeoutMs = 20000;
+constexpr int kDownloadStallMs = 60000;
 
 // Установленный помощник, а при запуске из каталога сборки — соседний файл.
 QString componentsHelperPath()
@@ -33,11 +43,12 @@ QString componentsHelperPath()
     return QFileInfo::exists(local) ? local : QString();
 }
 
-QNetworkRequest githubRequest(const QUrl &url)
+QNetworkRequest githubRequest(const QUrl &url, int timeoutMs)
 {
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("RedAnchor-Shell"));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    request.setTransferTimeout(timeoutMs);
     return request;
 }
 
@@ -45,6 +56,41 @@ QString readFileTrimmed(const QString &path)
 {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? QString::fromLatin1(file.readAll()).trimmed() : QString();
+}
+
+bool writeFile(const QString &path, const QByteArray &data)
+{
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(data) == data.size();
+}
+
+// Исполняемый файл в PATH или в одном из известных каталогов
+QString findProgram(const QString &name, const QStringList &extraDirs = {})
+{
+    const QString found = QStandardPaths::findExecutable(name);
+    if (!found.isEmpty())
+        return found;
+    return QStandardPaths::findExecutable(name, extraDirs);
+}
+
+const QStringList kSystemDirs = {QStringLiteral("/usr/games"), QStringLiteral("/usr/bin"), QStringLiteral("/usr/local/bin"),
+                                 QStringLiteral("/usr/local/games")};
+
+bool libraryExists(const QString &soname)
+{
+    for (const QString &dir : {QStringLiteral("/usr/lib/x86_64-linux-gnu"), QStringLiteral("/usr/lib64"),
+                               QStringLiteral("/usr/lib"), QStringLiteral("/lib/x86_64-linux-gnu")}) {
+        if (QFileInfo::exists(dir + QLatin1Char('/') + soname))
+            return true;
+    }
+    return false;
+}
+
+bool interFontInstalled()
+{
+    if (qobject_cast<QGuiApplication *>(QCoreApplication::instance()))
+        return QFontDatabase::families().contains(QStringLiteral("Inter"), Qt::CaseInsensitive);
+    return false;
 }
 
 } // namespace
@@ -58,13 +104,21 @@ ComponentsManager::ComponentsManager(QObject *parent)
                          : m_gpuVendor == QLatin1String("amd") ? tr("Mesa для видеокарт AMD")
                          : m_gpuVendor == QLatin1String("intel") ? tr("Mesa для графики Intel")
                          : tr("Mesa");
+    // Порядок списка — порядок установки
     m_items = {
+        {QStringLiteral("system"), tr("Системные компоненты"),
+         tr("gamescope, Xwayland, Python 3, PipeWire и шрифт Inter — для сессии и запуска игр")},
         {QStringLiteral("drivers"), tr("Графический драйвер"), driver},
         {QStringLiteral("vulkan"), tr("Vulkan"), tr("Графический интерфейс для игр и Proton")},
-        {QStringLiteral("proton"), tr("Proton"), tr("GE-Proton — запуск игр для Windows")},
-        {QStringLiteral("depotdownloader"), tr("DepotDownloader"), tr("Загрузка игр из Steam")},
-        {QStringLiteral("gogdl"), tr("gogdl"), tr("Загрузка игр из GOG")},
+        {QStringLiteral("steam"), tr("Steam"), tr("Официальный клиент: вход один раз в Big Picture, дальше обновляется сам")},
+        {QStringLiteral("proton"), tr("Proton"), tr("GE-Proton — запуск Windows-игр из GOG")},
+        {QStringLiteral("gogdl"), tr("gogdl"), tr("Загрузка игр из GOG"), false},
     };
+}
+
+QString ComponentsManager::steamExecutable()
+{
+    return findProgram(QStringLiteral("steam"), kSystemDirs);
 }
 
 QString ComponentsManager::detectGpuVendor()
@@ -100,6 +154,7 @@ QVariantList ComponentsManager::components() const
             {QStringLiteral("latest"), c.latest},
             {QStringLiteral("progress"), c.progress},
             {QStringLiteral("message"), c.message},
+            {QStringLiteral("recommended"), c.recommended},
         });
     }
     return list;
@@ -123,6 +178,15 @@ ComponentsManager::Component *ComponentsManager::find(const QString &key)
     return nullptr;
 }
 
+int ComponentsManager::rank(const QString &key) const
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items.at(i).key == key)
+            return i;
+    }
+    return int(m_items.size());
+}
+
 void ComponentsManager::setState(const QString &key, const QString &state, const QString &message)
 {
     // Пока компонент ждёт установки или ставится, его состояние меняет только установка
@@ -131,6 +195,15 @@ void ComponentsManager::setState(const QString &key, const QString &state, const
             c->state = state;
             c->message = message;
         }
+    }
+    emit componentsChanged();
+}
+
+void ComponentsManager::setProgress(double progress, const QString &message)
+{
+    if (Component *c = find(m_current)) {
+        c->progress = progress;
+        c->message = message;
     }
     emit componentsChanged();
 }
@@ -175,31 +248,149 @@ void ComponentsManager::check()
         c.progress = -1;
     }
     emit componentsChanged();
+    removeObsoleteTools();
     checkPackages();
     checkProtonLocal();
     fetchProtonRelease();
-    for (const QString &key : {QStringLiteral("depotdownloader"), QStringLiteral("gogdl")}) {
-        checkToolLocal(key);
-        fetchToolRelease(key);
-    }
+    checkToolLocal(QStringLiteral("gogdl"));
+    fetchToolRelease(QStringLiteral("gogdl"));
 }
 
-// ---------- Загрузчики игр (DepotDownloader, gogdl) ----------
+// Выпуск с GitHub. Ответ кэшируется вместе с ETag: повторная проверка с If-None-Match
+// не расходует лимит API (60 запросов в час без входа), а при ошибке или исчерпанном
+// лимите используется последний известный ответ.
+void ComponentsManager::fetchRelease(const QString &repo, const ReleaseCallback &callback)
+{
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/github");
+    const QString cacheBase = cacheDir + QLatin1Char('/') + QString(repo).replace(QLatin1Char('/'), QLatin1Char('_'));
+    QNetworkRequest request = githubRequest(QUrl(QStringLiteral("https://api.github.com/repos/%1/releases/latest").arg(repo)),
+                                            kApiTimeoutMs);
+    request.setRawHeader("Accept", "application/vnd.github+json");
+    const QByteArray cached = [&] {
+        QFile f(cacheBase + QStringLiteral(".json"));
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    }();
+    const QByteArray etag = readFileTrimmed(cacheBase + QStringLiteral(".etag")).toLatin1();
+    if (!cached.isEmpty() && !etag.isEmpty())
+        request.setRawHeader("If-None-Match", etag);
+
+    QNetworkReply *reply = m_network->get(request);
+    connect(reply, &QNetworkReply::finished, this, [reply, callback, cacheDir, cacheBase, cached, repo] {
+        reply->deleteLater();
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray body = reply->readAll();
+        const auto fromCache = [&](const QString &why) {
+            const QJsonObject release = QJsonDocument::fromJson(cached).object();
+            if (!release.isEmpty()) {
+                qInfo("GitHub %s: %s, using cached release", qPrintable(repo), qPrintable(why));
+                callback(release, QString());
+            } else {
+                callback({}, why);
+            }
+        };
+        if (status == 304) {
+            fromCache(QStringLiteral("not modified"));
+            return;
+        }
+        if (reply->error() != QNetworkReply::NoError || status != 200) {
+            const bool limited = status == 403 || status == 429;
+            qWarning("GitHub %s: HTTP %d %s", qPrintable(repo), status, qPrintable(reply->errorString()));
+            fromCache(limited ? tr("GitHub временно ограничил запросы — повторите позже")
+                              : status == 0 ? tr("Нет подключения к интернету")
+                                            : tr("Сервер GitHub недоступен"));
+            return;
+        }
+        const QJsonObject release = QJsonDocument::fromJson(body).object();
+        if (release.value(QStringLiteral("tag_name")).toString().isEmpty()) {
+            fromCache(tr("Непонятный ответ GitHub"));
+            return;
+        }
+        QDir().mkpath(cacheDir);
+        writeFile(cacheBase + QStringLiteral(".json"), body);
+        writeFile(cacheBase + QStringLiteral(".etag"), reply->rawHeader("ETag"));
+        callback(release, QString());
+    });
+}
+
+// Загрузка файла в target (через target.part). done(true) — файл на месте.
+void ComponentsManager::download(const QUrl &url, const QString &target, const std::function<void(bool ok)> &done)
+{
+    auto file = std::make_shared<QFile>(target + QStringLiteral(".part"));
+    if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("Cannot write %s: %s", qPrintable(file->fileName()), qPrintable(file->errorString()));
+        finishCurrent(false, tr("Не удалось сохранить загрузку."));
+        return;
+    }
+    auto writeFailed = std::make_shared<bool>(false);
+    m_download = m_network->get(githubRequest(url, kDownloadStallMs));
+    QNetworkReply *reply = m_download;
+    connect(reply, &QNetworkReply::readyRead, this, [reply, file, writeFailed] {
+        const QByteArray chunk = reply->readAll();
+        if (!*writeFailed && file->write(chunk) != chunk.size()) {
+            *writeFailed = true;   // закончилось место на диске
+            reply->abort();
+        }
+    });
+    connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
+        setProgress(total > 0 ? 0.9 * double(received) / double(total) : -1,
+                    total > 0 ? tr("Загрузка: %1 из %2 МБ").arg(received / 1048576).arg(total / 1048576)
+                              : tr("Загрузка: %1 МБ").arg(received / 1048576));
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, file, writeFailed, target, done] {
+        if (!*writeFailed) {
+            const QByteArray rest = reply->readAll();
+            if (file->write(rest) != rest.size())
+                *writeFailed = true;
+        }
+        file->close();
+        const bool ok = reply->error() == QNetworkReply::NoError && !*writeFailed;
+        const QString error = reply->errorString();
+        reply->deleteLater();
+        m_download = nullptr;
+        if (!ok) {
+            QFile::remove(file->fileName());
+            qWarning("Download of %s failed: %s", qPrintable(reply->url().toString()), qPrintable(error));
+            finishCurrent(false, *writeFailed ? tr("Недостаточно места на диске.")
+                                              : tr("Загрузка прервалась. Проверьте подключение к интернету."));
+            return;
+        }
+        QFile::remove(target);
+        if (!QFile::rename(file->fileName(), target)) {
+            QFile::remove(file->fileName());
+            finishCurrent(false, tr("Не удалось сохранить загрузку."));
+            return;
+        }
+        done(true);
+    });
+}
+
+// ---------- Загрузчик игр GOG (gogdl) ----------
 
 QString ComponentsManager::toolsDir() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/tools");
 }
 
-QString ComponentsManager::toolFile(const QString &key)
+QString ComponentsManager::toolFile(const QString &)
 {
-    return key == QLatin1String("depotdownloader") ? QStringLiteral("DepotDownloader") : QStringLiteral("gogdl");
+    return QStringLiteral("gogdl");
 }
 
-QString ComponentsManager::toolRepo(const QString &key)
+QString ComponentsManager::toolRepo(const QString &)
 {
-    return key == QLatin1String("depotdownloader") ? QStringLiteral("SteamRE/DepotDownloader")
-                                                   : QStringLiteral("Heroic-Games-Launcher/heroic-gogdl");
+    return QStringLiteral("Heroic-Games-Launcher/heroic-gogdl");
+}
+
+// DepotDownloader больше не нужен: Steam ставит и запускает игры сам
+void ComponentsManager::removeObsoleteTools()
+{
+    const QString dir = toolsDir();
+    if (!QFileInfo::exists(dir + QStringLiteral("/DepotDownloader")) && !QFileInfo::exists(dir + QStringLiteral("/DepotDownloader-dist")))
+        return;
+    qInfo("Removing obsolete DepotDownloader from %s", qPrintable(dir));
+    QFile::remove(dir + QStringLiteral("/DepotDownloader"));
+    QFile::remove(dir + QStringLiteral("/DepotDownloader.version"));
+    QDir(dir + QStringLiteral("/DepotDownloader-dist")).removeRecursively();
 }
 
 void ComponentsManager::checkToolLocal(const QString &key)
@@ -214,43 +405,42 @@ void ComponentsManager::checkToolLocal(const QString &key)
 void ComponentsManager::fetchToolRelease(const QString &key)
 {
     beginCheck();
-    QNetworkReply *reply = m_network->get(githubRequest(QUrl(QStringLiteral("https://api.github.com/repos/%1/releases/latest").arg(toolRepo(key)))));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, key] {
-        reply->deleteLater();
+    fetchRelease(toolRepo(key), [this, key](const QJsonObject &release, const QString &error) {
         Component *c = find(key);
         const QString local = c ? c->version : QString();
         const bool installed = QFileInfo(toolsDir() + QLatin1Char('/') + toolFile(key)).isExecutable();
-        if (reply->error() != QNetworkReply::NoError) {
+        if (!error.isEmpty()) {
             setState(key, installed ? QStringLiteral("installed") : QStringLiteral("missing"),
-                     installed ? tr("Не удалось проверить обновления") : tr("Нет подключения к интернету"));
+                     installed ? tr("Не удалось проверить обновления") : error);
             endCheck();
             return;
         }
-        const QJsonObject release = QJsonDocument::fromJson(reply->readAll()).object();
         const QString tag = release.value(QStringLiteral("tag_name")).toString();
-        // Сборка для Linux x64: архив или исполняемый файл
-        QString url, name;
+        // Сборка для Linux x64: исполняемый файл (gogdl_linux_x86_64) или архив
+        Release found;
+        found.tag = tag;
         for (const QJsonValue &value : release.value(QStringLiteral("assets")).toArray()) {
             const QJsonObject asset = value.toObject();
             const QString assetName = asset.value(QStringLiteral("name")).toString();
             const QString lower = assetName.toLower();
             if (!lower.contains(QLatin1String("linux")) || lower.contains(QLatin1String("arm"))
                 || lower.contains(QLatin1String("aarch64")) || lower.endsWith(QLatin1String(".sha256"))
-                || lower.endsWith(QLatin1String(".sig")) || lower.endsWith(QLatin1String(".asc")))
+                || lower.endsWith(QLatin1String(".sha512")) || lower.endsWith(QLatin1String(".sig"))
+                || lower.endsWith(QLatin1String(".asc")))
                 continue;
-            url = asset.value(QStringLiteral("browser_download_url")).toString();
-            name = assetName;
+            found.url = QUrl(asset.value(QStringLiteral("browser_download_url")).toString());
+            found.fileName = QFileInfo(assetName).fileName();   // без каталогов в имени
             if (lower.contains(QLatin1String("x64")) || lower.contains(QLatin1String("x86_64")) || lower.contains(QLatin1String("amd64")))
                 break;
         }
-        if (url.isEmpty()) {
+        if (!found.url.isValid() || found.fileName.isEmpty()) {
             qWarning("No Linux build of %s in the latest release", qPrintable(toolRepo(key)));
             setState(key, installed ? QStringLiteral("installed") : QStringLiteral("failed"),
                      installed ? QString() : tr("Не найдена сборка для Linux"));
             endCheck();
             return;
         }
-        m_toolReleases.insert(key, {tag, url, name});
+        m_toolReleases.insert(key, found);
         if (c)
             c->latest = tag;
         setState(key, !installed ? QStringLiteral("missing")
@@ -262,71 +452,39 @@ void ComponentsManager::fetchToolRelease(const QString &key)
 
 void ComponentsManager::installTool(const QString &key)
 {
-    const QStringList release = m_toolReleases.value(key);
-    if (release.size() < 3) {
+    if (!m_toolReleases.contains(key)) {
         finishCurrent(false, tr("Нет сведений о выпуске. Проверьте подключение к интернету."));
         return;
     }
-    const QString tag = release.at(0);
-    const QString archive = toolsDir() + QLatin1Char('/') + release.at(2);
+    const Release release = m_toolReleases.value(key);
+    const QString archive = toolsDir() + QLatin1Char('/') + release.fileName;
     const QString target = toolsDir() + QLatin1Char('/') + toolFile(key);
     QDir().mkpath(toolsDir());
 
-    auto *file = new QFile(archive + QStringLiteral(".part"), this);
-    if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file->deleteLater();
-        finishCurrent(false, tr("Не удалось сохранить загрузку."));
-        return;
-    }
-    m_download = m_network->get(githubRequest(QUrl(release.at(1))));
-    connect(m_download, &QNetworkReply::readyRead, this, [this, file] { file->write(m_download->readAll()); });
-    connect(m_download, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
-        if (Component *c = find(m_current)) {
-            c->progress = total > 0 ? 0.9 * double(received) / double(total) : -1;
-            c->message = tr("Загрузка: %1 МБ").arg(received / 1048576);
-        }
-        emit componentsChanged();
-    });
-    connect(m_download, &QNetworkReply::finished, this, [this, file, archive, target, tag, key] {
-        file->write(m_download->readAll());
-        file->close();
-        const bool ok = m_download->error() == QNetworkReply::NoError;
-        m_download->deleteLater();
-        m_download = nullptr;
-        file->deleteLater();
-        if (!ok) {
-            QFile::remove(file->fileName());
-            finishCurrent(false, tr("Загрузка прервалась. Проверьте подключение к интернету."));
-            return;
-        }
-        QFile::remove(archive);
-        QFile::rename(file->fileName(), archive);
-
-        const auto done = [this, target, tag] {
+    download(release.url, archive, [this, archive, target, key, release](bool) {
+        const auto done = [this, target, release] {
             QFile::setPermissions(target, QFile::permissions(target) | QFile::ExeOwner | QFile::ExeGroup | QFile::ExeOther);
             if (!QFileInfo(target).isExecutable()) {
                 finishCurrent(false, tr("Не удалось установить."));
                 return;
             }
-            QFile version(target + QStringLiteral(".version"));
-            if (version.open(QIODevice::WriteOnly | QIODevice::Truncate))
-                version.write(tag.toUtf8());
+            writeFile(target + QStringLiteral(".version"), release.tag.toUtf8());
+            if (Component *c = find(m_current))
+                c->latest = release.tag;
             finishCurrent(true);
         };
 
         const QString lower = archive.toLower();
         if (!lower.endsWith(QLatin1String(".zip")) && !lower.contains(QLatin1String(".tar"))) {
-            QFile::remove(target);
-            QFile::rename(archive, target);
+            if (archive != target) {
+                QFile::remove(target);
+                QFile::rename(archive, target);
+            }
             done();
             return;
         }
         // Архив: распаковываем и ищем в нём исполняемый файл
-        if (Component *c = find(m_current)) {
-            c->progress = 0.95;
-            c->message = tr("Распаковка…");
-        }
-        emit componentsChanged();
+        setProgress(0.95, tr("Распаковка…"));
         const QString unpackDir = target + QStringLiteral("-dist");
         QDir(unpackDir).removeRecursively();
         QDir().mkpath(unpackDir);
@@ -353,11 +511,20 @@ void ComponentsManager::installTool(const QString &key)
             }
             done();
         });
+        connect(unpack, &QProcess::errorOccurred, this, [this, unpack, archive](QProcess::ProcessError error) {
+            if (error != QProcess::FailedToStart)
+                return;
+            unpack->deleteLater();
+            QFile::remove(archive);
+            finishCurrent(false, tr("Не удалось распаковать: нет программы распаковки."));
+        });
         unpack->start(zip ? QStringLiteral("unzip") : QStringLiteral("tar"),
                       zip ? QStringList{QStringLiteral("-o"), archive, QStringLiteral("-d"), unpackDir}
                           : QStringList{QStringLiteral("-xf"), archive, QStringLiteral("-C"), unpackDir});
     });
 }
+
+// ---------- Системные пакеты ----------
 
 void ComponentsManager::checkPackages()
 {
@@ -367,7 +534,11 @@ void ComponentsManager::checkPackages()
         QStringLiteral("libvulkan1"), QStringLiteral("libvulkan1:i386"),
         QStringLiteral("mesa-vulkan-drivers"), QStringLiteral("mesa-vulkan-drivers:i386"),
         QStringLiteral("libgl1-mesa-dri"), QStringLiteral("libgl1-mesa-dri:i386"),
-        QStringLiteral("nvidia-driver-*"),
+        QStringLiteral("nvidia-driver"), QStringLiteral("nvidia-driver-*"),
+        QStringLiteral("steam-installer"), QStringLiteral("steam-launcher"), QStringLiteral("steam"),
+        QStringLiteral("steam:i386"), QStringLiteral("steam-devices"),
+        QStringLiteral("gamescope"), QStringLiteral("libxcb-cursor0"),
+        QStringLiteral("fonts-inter"), QStringLiteral("fonts-inter-variable"),
     };
     connect(proc, &QProcess::finished, this, [this, proc] {
         proc->deleteLater();
@@ -379,64 +550,139 @@ void ComponentsManager::checkPackages()
             if (parts.size() >= 3 && parts.at(1) == QLatin1String("ii"))
                 installed.insert(parts.at(0), parts.at(2));
         }
-        const auto native = [&](const QString &pkg) {
-            for (auto it = installed.cbegin(); it != installed.cend(); ++it) {
-                if (it.key().startsWith(pkg + QLatin1Char(':')) && !it.key().endsWith(QLatin1String(":i386")))
-                    return it.value();
-            }
-            return QString();
-        };
-        const auto foreign32 = [&](const QString &pkg) { return installed.value(pkg + QStringLiteral(":i386")); };
-
-        if (proc->exitStatus() != QProcess::NormalExit || (installed.isEmpty() && proc->exitCode() != 0 && proc->exitCode() != 1)) {
-            const QString error = tr("Не удалось проверить пакеты: нужна система на базе Ubuntu или Debian.");
-            setState(QStringLiteral("drivers"), QStringLiteral("failed"), error);
-            setState(QStringLiteral("vulkan"), QStringLiteral("failed"), error);
-            endCheck();
-            return;
-        }
-
-        const bool nvidia = m_gpuVendor == QLatin1String("nvidia");
-
-        // Vulkan: загрузчик 64 и 32 бита, для AMD/Intel ещё и драйверы Mesa Vulkan
-        const bool vulkan = !native(QStringLiteral("libvulkan1")).isEmpty() && !foreign32(QStringLiteral("libvulkan1")).isEmpty()
-                            && (nvidia || (!native(QStringLiteral("mesa-vulkan-drivers")).isEmpty()
-                                           && !foreign32(QStringLiteral("mesa-vulkan-drivers")).isEmpty()));
-        if (Component *c = find(QStringLiteral("vulkan")))
-            c->version = native(QStringLiteral("libvulkan1"));
-        setState(QStringLiteral("vulkan"), vulkan ? QStringLiteral("installed") : QStringLiteral("missing"));
-
-        // Драйвер
-        QString driverVersion;
-        if (nvidia) {
-            for (auto it = installed.cbegin(); it != installed.cend(); ++it) {
-                if (it.key().startsWith(QLatin1String("nvidia-driver-")))
-                    driverVersion = it.value();
-            }
-            if (driverVersion.isEmpty() && QFileInfo::exists(QStringLiteral("/proc/driver/nvidia/version")))
-                driverVersion = tr("загружен");
-        } else if (!foreign32(QStringLiteral("libgl1-mesa-dri")).isEmpty()) {
-            driverVersion = native(QStringLiteral("libgl1-mesa-dri"));
-        }
-        if (Component *c = find(QStringLiteral("drivers")))
-            c->version = driverVersion;
-        setState(QStringLiteral("drivers"), driverVersion.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
-                 !driverVersion.isEmpty() && nvidia && m_rebootRequired ? tr("Заработает после перезагрузки") : QString());
+        // Код 1 — часть пакетов не найдена, это нормально
+        const bool ok = proc->exitStatus() == QProcess::NormalExit
+                        && (!installed.isEmpty() || proc->exitCode() == 0 || proc->exitCode() == 1);
+        applyPackageState(installed, ok);
         endCheck();
     });
     connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
             return;
         proc->deleteLater();
-        const QString message = tr("Не удалось проверить пакеты: нужна система на базе Ubuntu или Debian.");
-        setState(QStringLiteral("drivers"), QStringLiteral("failed"), message);
-        setState(QStringLiteral("vulkan"), QStringLiteral("failed"), message);
+        applyPackageState({}, false);
         endCheck();
     });
     proc->start(QStringLiteral("dpkg-query"),
                 QStringList{QStringLiteral("-W"), QStringLiteral("-f=${Package}:${Architecture} ${db:Status-Abbrev} ${Version}\\n")}
                     + packages);
 }
+
+void ComponentsManager::applyPackageState(const QHash<QString, QString> &installed, bool dpkgOk)
+{
+    // Версия пакета основной архитектуры (amd64 или all)
+    const auto native = [&](const QString &pkg) {
+        for (auto it = installed.cbegin(); it != installed.cend(); ++it) {
+            if (it.key().startsWith(pkg + QLatin1Char(':')) && !it.key().endsWith(QLatin1String(":i386")))
+                return it.value();
+        }
+        return QString();
+    };
+    const auto foreign32 = [&](const QString &pkg) { return installed.value(pkg + QStringLiteral(":i386")); };
+    const auto any = [&](const QString &pkg) {
+        const QString v = native(pkg);
+        return v.isEmpty() ? foreign32(pkg) : v;
+    };
+
+    // --- Системные компоненты: проверяем сами файлы, пакеты — только для версии и шрифта ---
+    {
+        QStringList missing, missingRecommended;
+        const bool gamescope = !findProgram(QStringLiteral("gamescope"), kSystemDirs).isEmpty();
+        const bool cage = !findProgram(QStringLiteral("cage"), kSystemDirs).isEmpty();
+        // Proton — скрипт на Python 3
+        if (findProgram(QStringLiteral("python3"), kSystemDirs).isEmpty())
+            missing << QStringLiteral("Python 3");
+        if (!libraryExists(QStringLiteral("libxcb-cursor.so.0")) && native(QStringLiteral("libxcb-cursor0")).isEmpty())
+            missing << QStringLiteral("libxcb-cursor0");
+        if (!gamescope && !cage)
+            missing << QStringLiteral("gamescope");
+        else if (!gamescope)
+            missingRecommended << QStringLiteral("gamescope");
+        if (gamescope && findProgram(QStringLiteral("Xwayland"), kSystemDirs).isEmpty())
+            missing << QStringLiteral("Xwayland");
+        if (findProgram(QStringLiteral("wpctl"), kSystemDirs).isEmpty() && findProgram(QStringLiteral("pactl"), kSystemDirs).isEmpty())
+            missingRecommended << tr("управление звуком (WirePlumber)");
+        if (native(QStringLiteral("fonts-inter")).isEmpty() && native(QStringLiteral("fonts-inter-variable")).isEmpty()
+            && !interFontInstalled())
+            missingRecommended << tr("шрифт Inter");
+
+        if (Component *c = find(QStringLiteral("system")))
+            c->version = native(QStringLiteral("gamescope")).isEmpty() ? QString()
+                                                                       : QStringLiteral("gamescope ") + native(QStringLiteral("gamescope"));
+        const bool attempted = m_attempted.contains(QStringLiteral("system"));
+        if (!missing.isEmpty()) {
+            setState(QStringLiteral("system"), QStringLiteral("missing"), tr("Не хватает: %1").arg(missing.join(QStringLiteral(", "))));
+        } else if (!missingRecommended.isEmpty()) {
+            // Помощник уже пробовал — значит, этого нет в репозиториях системы; не зацикливаемся
+            setState(QStringLiteral("system"), attempted ? QStringLiteral("installed") : QStringLiteral("missing"),
+                     (attempted ? tr("Нет в репозиториях: %1") : tr("Не хватает: %1")).arg(missingRecommended.join(QStringLiteral(", "))));
+        } else {
+            setState(QStringLiteral("system"), QStringLiteral("installed"));
+        }
+    }
+
+    // --- Steam: достаточно исполняемого файла, обновляется он сам ---
+    {
+        const QString steam = steamExecutable();
+        QString version = native(QStringLiteral("steam-installer"));
+        if (version.isEmpty())
+            version = native(QStringLiteral("steam-launcher"));
+        if (version.isEmpty())
+            version = any(QStringLiteral("steam"));
+        if (Component *c = find(QStringLiteral("steam")))
+            c->version = steam.isEmpty() ? QString() : version;
+        // Правила udev для контроллеров: steam-devices (Ubuntu, Debian) или из steam-launcher (Valve)
+        bool udevRules = !any(QStringLiteral("steam-devices")).isEmpty();
+        for (const QString &dir : {QStringLiteral("/usr/lib/udev/rules.d"), QStringLiteral("/lib/udev/rules.d"),
+                                   QStringLiteral("/etc/udev/rules.d")}) {
+            if (QFileInfo::exists(dir + QStringLiteral("/60-steam-input.rules")))
+                udevRules = true;
+        }
+        QString note;
+        if (!steam.isEmpty() && dpkgOk && !udevRules && !m_attempted.contains(QStringLiteral("steam")))
+            note = tr("Нет правил для контроллеров (steam-devices)");
+        // Без steam-devices геймпады в играх работают хуже — предлагаем доустановить
+        setState(QStringLiteral("steam"), steam.isEmpty() || !note.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
+                 note);
+    }
+
+    if (!dpkgOk) {
+        const QString error = tr("Не удалось проверить пакеты: нужна система на базе Ubuntu или Debian.");
+        setState(QStringLiteral("drivers"), QStringLiteral("failed"), error);
+        setState(QStringLiteral("vulkan"), QStringLiteral("failed"), error);
+        return;
+    }
+
+    const bool nvidia = m_gpuVendor == QLatin1String("nvidia");
+
+    // Vulkan: загрузчик 64 и 32 бита, для AMD/Intel ещё и драйверы Mesa Vulkan
+    const bool vulkan = !native(QStringLiteral("libvulkan1")).isEmpty() && !foreign32(QStringLiteral("libvulkan1")).isEmpty()
+                        && (nvidia || (!native(QStringLiteral("mesa-vulkan-drivers")).isEmpty()
+                                       && !foreign32(QStringLiteral("mesa-vulkan-drivers")).isEmpty()));
+    if (Component *c = find(QStringLiteral("vulkan")))
+        c->version = native(QStringLiteral("libvulkan1"));
+    setState(QStringLiteral("vulkan"), vulkan ? QStringLiteral("installed") : QStringLiteral("missing"));
+
+    // Драйвер: Ubuntu — nvidia-driver-<версия>[-open|-server], Debian — nvidia-driver
+    QString driverVersion;
+    if (nvidia) {
+        static const QRegularExpression nvidiaPkg(QStringLiteral("^nvidia-driver(-\\d+[a-z-]*)?:"));
+        for (auto it = installed.cbegin(); it != installed.cend(); ++it) {
+            if (nvidiaPkg.match(it.key()).hasMatch() && !it.key().endsWith(QLatin1String(":i386")))
+                driverVersion = it.value();
+        }
+        if (driverVersion.isEmpty() && QFileInfo::exists(QStringLiteral("/proc/driver/nvidia/version")))
+            driverVersion = tr("загружен");
+    } else if (!foreign32(QStringLiteral("libgl1-mesa-dri")).isEmpty()) {
+        driverVersion = native(QStringLiteral("libgl1-mesa-dri"));
+    }
+    if (Component *c = find(QStringLiteral("drivers")))
+        c->version = driverVersion;
+    setState(QStringLiteral("drivers"), driverVersion.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
+             !driverVersion.isEmpty() && nvidia && m_rebootRequired ? tr("Заработает после перезагрузки") : QString());
+}
+
+// ---------- Proton ----------
 
 void ComponentsManager::checkProtonLocal()
 {
@@ -459,31 +705,30 @@ void ComponentsManager::checkProtonLocal()
 void ComponentsManager::fetchProtonRelease()
 {
     beginCheck();
-    QNetworkReply *reply = m_network->get(githubRequest(kProtonRelease));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        reply->deleteLater();
+    fetchRelease(kProtonRepo, [this](const QJsonObject &release, const QString &error) {
         Component *c = find(QStringLiteral("proton"));
         const QString local = c ? c->version : QString();
-        if (reply->error() != QNetworkReply::NoError) {
-            qWarning("Proton release check failed: %s", qPrintable(reply->errorString()));
+        if (!error.isEmpty()) {
             setState(QStringLiteral("proton"), local.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
-                     local.isEmpty() ? tr("Нет подключения к интернету") : tr("Не удалось проверить обновления"));
+                     local.isEmpty() ? error : tr("Не удалось проверить обновления"));
             endCheck();
             return;
         }
-        const QJsonObject release = QJsonDocument::fromJson(reply->readAll()).object();
         const QString tag = release.value(QStringLiteral("tag_name")).toString();
-        m_protonUrl.clear();
-        m_protonChecksumUrl.clear();
+        Release found;
+        found.tag = tag;
         for (const QJsonValue &value : release.value(QStringLiteral("assets")).toArray()) {
             const QJsonObject asset = value.toObject();
             const QString name = asset.value(QStringLiteral("name")).toString();
             const QUrl url(asset.value(QStringLiteral("browser_download_url")).toString());
-            if (name.endsWith(QLatin1String(".tar.gz")))
-                m_protonUrl = url;
-            else if (name.endsWith(QLatin1String(".sha512sum")))
-                m_protonChecksumUrl = url;
+            if (name.endsWith(QLatin1String(".tar.gz"))) {
+                found.url = url;
+                found.fileName = QFileInfo(name).fileName();
+            } else if (name.endsWith(QLatin1String(".sha512sum"))) {
+                found.checksumUrl = url;
+            }
         }
+        m_proton = found;
         if (c)
             c->latest = tag;
         const QString state = local.isEmpty() ? QStringLiteral("missing")
@@ -504,17 +749,23 @@ void ComponentsManager::install(const QString &key)
     c->state = QStringLiteral("queued");
     c->message.clear();
     c->progress = -1;
-    m_queue.append(key);
+    // Очередь держим в порядке установки: драйверы раньше Steam, Steam раньше Proton
+    auto pos = std::find_if(m_queue.begin(), m_queue.end(), [&](const QString &k) { return rank(k) > rank(key); });
+    m_queue.insert(pos, key);
     emit componentsChanged();
     processQueue();
 }
 
 void ComponentsManager::installAll()
 {
+    // install() может сразу начать установку и поменять m_items — идём по копии ключей
+    QStringList keys;
     for (const Component &c : std::as_const(m_items)) {
         if (c.state == QLatin1String("missing") || c.state == QLatin1String("update") || c.state == QLatin1String("failed"))
-            install(c.key);
+            keys.append(c.key);
     }
+    for (const QString &key : std::as_const(keys))
+        install(key);
 }
 
 void ComponentsManager::processQueue()
@@ -530,7 +781,7 @@ void ComponentsManager::processQueue()
     emit componentsChanged();
     if (m_current == QLatin1String("proton"))
         downloadProton();
-    else if (m_current == QLatin1String("depotdownloader") || m_current == QLatin1String("gogdl"))
+    else if (m_current == QLatin1String("gogdl"))
         installTool(m_current);
     else
         runHelper(m_current);
@@ -545,7 +796,7 @@ void ComponentsManager::finishCurrent(bool ok, const QString &message)
         if (ok) {
             c->state = QStringLiteral("installed");
             c->message = key == QLatin1String("drivers") && m_rebootRequired ? tr("Заработает после перезагрузки") : QString();
-            if (key == QLatin1String("proton") || key == QLatin1String("depotdownloader") || key == QLatin1String("gogdl"))
+            if (key == QLatin1String("proton") || key == QLatin1String("gogdl"))
                 c->version = c->latest;
         } else {
             c->state = QStringLiteral("failed");
@@ -556,7 +807,7 @@ void ComponentsManager::finishCurrent(bool ok, const QString &message)
     emit componentsChanged();
 
     // Уточняем версии установленных пакетов
-    if (ok && key != QLatin1String("proton"))
+    if (ok && key != QLatin1String("proton") && key != QLatin1String("gogdl"))
         checkPackages();
 
     processQueue();
@@ -571,10 +822,11 @@ void ComponentsManager::runHelper(const QString &key)
         finishCurrent(false, tr("Помощник установки не найден — установите оболочку (sudo cmake --install build)."));
         return;
     }
+    m_attempted.insert(key);
 
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::SeparateChannels);
-    connect(m_process, &QProcess::readyReadStandardOutput, this, [this] {
+    const auto parseOutput = [this] {
         while (m_process && m_process->canReadLine()) {
             const QString line = QString::fromUtf8(m_process->readLine()).trimmed();
             if (line == QLatin1String("REBOOT")) {
@@ -585,19 +837,21 @@ void ComponentsManager::runHelper(const QString &key)
                 continue;
             const QString rest = line.mid(9);
             const qsizetype space = rest.indexOf(QLatin1Char(' '));
-            if (Component *c = find(m_current)) {
-                c->progress = qBound(0, rest.left(space).toInt(), 100) / 100.0;
-                c->message = space > 0 ? rest.mid(space + 1) : QString();
-            }
-            emit componentsChanged();
+            const int percent = qBound(0, (space > 0 ? rest.left(space) : rest).toInt(), 100);
+            setProgress(percent / 100.0, space > 0 ? rest.mid(space + 1) : QString());
         }
-    });
+    };
+    connect(m_process, &QProcess::readyReadStandardOutput, this, parseOutput);
     connect(m_process, &QProcess::readyReadStandardError, this, [this] {
         const QByteArray text = m_process->readAllStandardError().trimmed();
         if (!text.isEmpty())
             qInfo("redanchor-components: %s", text.constData());
     });
-    connect(m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+    connect(m_process, &QProcess::finished, this, [this, parseOutput](int code, QProcess::ExitStatus status) {
+        parseOutput();   // последние строки (REBOOT) могли прийти вместе с завершением
+        const QByteArray tail = m_process->readAllStandardError().trimmed();
+        if (!tail.isEmpty())
+            qInfo("redanchor-components: %s", tail.constData());
         m_process->deleteLater();
         m_process = nullptr;
         const bool ok = status == QProcess::NormalExit && code == 0;
@@ -618,46 +872,14 @@ void ComponentsManager::runHelper(const QString &key)
 
 void ComponentsManager::downloadProton()
 {
-    if (!m_protonUrl.isValid()) {
+    if (!m_proton.url.isValid() || m_proton.fileName.isEmpty()) {
         finishCurrent(false, tr("Нет сведений о выпуске Proton. Проверьте подключение к интернету."));
         return;
     }
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/downloads");
     QDir().mkpath(dir);
-    const QString target = dir + QLatin1Char('/') + m_protonUrl.fileName();
-    auto *file = new QFile(target + QStringLiteral(".part"), this);
-    if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        file->deleteLater();
-        finishCurrent(false, tr("Не удалось сохранить загрузку."));
-        return;
-    }
-
-    m_download = m_network->get(githubRequest(m_protonUrl));
-    connect(m_download, &QNetworkReply::readyRead, this, [this, file] { file->write(m_download->readAll()); });
-    connect(m_download, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
-        if (Component *c = find(m_current)) {
-            c->progress = total > 0 ? 0.9 * double(received) / double(total) : -1;
-            c->message = total > 0 ? tr("Загрузка: %1 из %2 МБ").arg(received / 1048576).arg(total / 1048576)
-                                   : tr("Загрузка: %1 МБ").arg(received / 1048576);
-        }
-        emit componentsChanged();
-    });
-    connect(m_download, &QNetworkReply::finished, this, [this, file, target] {
-        file->write(m_download->readAll());
-        file->close();
-        const bool ok = m_download->error() == QNetworkReply::NoError;
-        const QString error = m_download->errorString();
-        m_download->deleteLater();
-        m_download = nullptr;
-        file->deleteLater();
-        if (!ok) {
-            QFile::remove(file->fileName());
-            qWarning("Proton download failed: %s", qPrintable(error));
-            finishCurrent(false, tr("Загрузка прервалась. Проверьте подключение к интернету."));
-            return;
-        }
-        QFile::remove(target);
-        QFile::rename(file->fileName(), target);
+    const QString target = dir + QLatin1Char('/') + m_proton.fileName;
+    download(m_proton.url, target, [this, target](bool) {
         qInfo("Proton: downloaded %s (%lld bytes)", qPrintable(target), qlonglong(QFileInfo(target).size()));
         verifyAndExtractProton(target);
     });
@@ -665,83 +887,27 @@ void ComponentsManager::downloadProton()
 
 void ComponentsManager::verifyAndExtractProton(const QString &archive)
 {
-    const auto extract = [this, archive] {
-        if (Component *c = find(m_current)) {
-            c->progress = 0.95;
-            c->message = tr("Распаковка…");
-        }
-        emit componentsChanged();
-        QDir().mkpath(compatToolsDir());
-        // Что было до распаковки: новый Proton — каталог, которого не было
-        const QStringList before = QDir(compatToolsDir()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        qInfo("Proton: extracting %s (%lld bytes) to %s", qPrintable(archive),
-              qlonglong(QFileInfo(archive).size()), qPrintable(compatToolsDir()));
-        auto *tar = new QProcess(this);
-        tar->setProcessChannelMode(QProcess::MergedChannels);
-        connect(tar, &QProcess::finished, this, [this, tar, archive, before](int code, QProcess::ExitStatus status) {
-            const QString output = QString::fromUtf8(tar->readAll()).trimmed();
-            tar->deleteLater();
-            QFile::remove(archive);
-            if (status != QProcess::NormalExit || code != 0) {
-                qWarning("Proton: tar failed (exit %d): %s", code, qPrintable(output));
-                finishCurrent(false, tr("Не удалось распаковать Proton."));
-                return;
-            }
-            // Новый каталог с файлом proton — независимо от того, совпадает ли его имя с тегом выпуска
-            const QDir dir(compatToolsDir());
-            QString installed;
-            for (const QString &name : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-                if (!before.contains(name) && QFileInfo(dir.filePath(name) + QStringLiteral("/proton")).isFile())
-                    installed = name;
-            }
-            if (installed.isEmpty()) {
-                // Переустановка той же версии: каталог был и раньше
-                const Component *c = find(m_current);
-                const QString latest = c ? c->latest : QString();
-                if (!latest.isEmpty() && QFileInfo(dir.filePath(latest) + QStringLiteral("/proton")).isFile())
-                    installed = latest;
-            }
-            if (installed.isEmpty()) {
-                qWarning("Proton: no directory with 'proton' after extraction; contents: %s",
-                         qPrintable(dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).join(QStringLiteral(", "))));
-                finishCurrent(false, tr("Proton распакован не полностью. Попробуйте ещё раз."));
-                return;
-            }
-            qInfo("Proton: installed %s", qPrintable(dir.filePath(installed)));
-            // Старые выпуски удаляем только после того, как новый проверен
-            for (const QString &name : before) {
-                if (name != installed && name.startsWith(kProtonPrefix))
-                    QDir(dir.filePath(name)).removeRecursively();
-            }
-            if (Component *c = find(m_current))
-                c->latest = installed;   // finishCurrent запишет его в version
-            finishCurrent(true);
-        });
-        tar->start(QStringLiteral("tar"), {QStringLiteral("-xzf"), archive, QStringLiteral("-C"), compatToolsDir()});
-    };
-
-    if (!m_protonChecksumUrl.isValid()) {
-        extract();
+    if (!m_proton.checksumUrl.isValid()) {
+        qWarning("Proton: no checksum in the release, skipping verification");
+        extractProton(archive);
         return;
     }
-    if (Component *c = find(m_current)) {
-        c->progress = 0.92;
-        c->message = tr("Проверка архива…");
-    }
-    emit componentsChanged();
+    setProgress(0.92, tr("Проверка архива…"));
 
-    // Контрольная сумма с GitHub и sha512sum — без блокировки интерфейса на большом архиве
-    QNetworkReply *reply = m_network->get(githubRequest(m_protonChecksumUrl));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, archive, extract] {
+    // Контрольная сумма с GitHub; SHA-512 считаем в отдельном процессе, чтобы не блокировать интерфейс
+    QNetworkReply *reply = m_network->get(githubRequest(m_proton.checksumUrl, kApiTimeoutMs));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, archive] {
         reply->deleteLater();
         const QString expected = QString::fromLatin1(reply->readAll()).section(QLatin1Char(' '), 0, 0).trimmed().toLower();
-        if (reply->error() != QNetworkReply::NoError || expected.isEmpty()) {
-            qWarning("Proton checksum unavailable, skipping verification");
-            extract();
+        static const QRegularExpression sha512(QStringLiteral("^[0-9a-f]{128}$"));
+        if (reply->error() != QNetworkReply::NoError || !sha512.match(expected).hasMatch()) {
+            // Без суммы tar всё равно проверит целостность gzip
+            qWarning("Proton checksum unavailable (%s), skipping verification", qPrintable(reply->errorString()));
+            extractProton(archive);
             return;
         }
         auto *sum = new QProcess(this);
-        connect(sum, &QProcess::finished, this, [this, sum, archive, expected, extract] {
+        connect(sum, &QProcess::finished, this, [this, sum, archive, expected] {
             sum->deleteLater();
             const QString actual = QString::fromLatin1(sum->readAllStandardOutput()).section(QLatin1Char(' '), 0, 0).trimmed().toLower();
             qInfo("Proton: checksum %s", actual == expected ? "ok" : "MISMATCH");
@@ -750,8 +916,87 @@ void ComponentsManager::verifyAndExtractProton(const QString &archive)
                 finishCurrent(false, tr("Архив Proton повреждён. Попробуйте ещё раз."));
                 return;
             }
-            extract();
+            extractProton(archive);
+        });
+        connect(sum, &QProcess::errorOccurred, this, [this, sum, archive](QProcess::ProcessError error) {
+            if (error != QProcess::FailedToStart)
+                return;
+            sum->deleteLater();
+            qWarning("Proton: sha512sum unavailable, skipping verification");
+            extractProton(archive);
         });
         sum->start(QStringLiteral("sha512sum"), {archive});
     });
+}
+
+// Распаковка во временный каталог рядом и перенос на место: прерванная распаковка не
+// оставит «установленный» наполовину Proton, а старые версии удаляются только после
+// того, как новая на месте.
+void ComponentsManager::extractProton(const QString &archive)
+{
+    setProgress(0.95, tr("Распаковка…"));
+    const QString tools = compatToolsDir();
+    const QString staging = tools + QLatin1Char('/') + kProtonStaging;
+    QDir(staging).removeRecursively();
+    QDir().mkpath(staging);
+    qInfo("Proton: extracting %s (%lld bytes) to %s", qPrintable(archive), qlonglong(QFileInfo(archive).size()), qPrintable(staging));
+
+    auto *tar = new QProcess(this);
+    tar->setProcessChannelMode(QProcess::MergedChannels);
+    connect(tar, &QProcess::finished, this, [this, tar, archive, tools, staging](int code, QProcess::ExitStatus status) {
+        const QString output = QString::fromUtf8(tar->readAll()).trimmed();
+        tar->deleteLater();
+        QFile::remove(archive);
+        if (status != QProcess::NormalExit || code != 0) {
+            qWarning("Proton: tar failed (exit %d): %s", code, qPrintable(output));
+            QDir(staging).removeRecursively();
+            finishCurrent(false, tr("Не удалось распаковать Proton (не хватает места?)."));
+            return;
+        }
+        // Каталог с файлом proton — независимо от того, совпадает ли его имя с тегом выпуска
+        const QDir stage(staging);
+        QString name;
+        for (const QString &entry : stage.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (QFileInfo(stage.filePath(entry) + QStringLiteral("/proton")).isFile())
+                name = entry;
+        }
+        if (name.isEmpty()) {
+            qWarning("Proton: no directory with 'proton' after extraction; contents: %s",
+                     qPrintable(stage.entryList(QDir::Dirs | QDir::NoDotAndDotDot).join(QStringLiteral(", "))));
+            QDir(staging).removeRecursively();
+            finishCurrent(false, tr("Proton распакован не полностью. Попробуйте ещё раз."));
+            return;
+        }
+        const QDir dir(tools);
+        const QString final = dir.filePath(name);
+        // Переустановка той же версии: старый каталог убираем
+        if (QFileInfo::exists(final))
+            QDir(final).removeRecursively();
+        if (!QDir().rename(stage.filePath(name), final)) {
+            qWarning("Proton: cannot move %s to %s", qPrintable(stage.filePath(name)), qPrintable(final));
+            QDir(staging).removeRecursively();
+            finishCurrent(false, tr("Не удалось установить Proton."));
+            return;
+        }
+        QDir(staging).removeRecursively();
+        qInfo("Proton: installed %s", qPrintable(final));
+        // Старые выпуски GE-Proton — после того, как новый на месте
+        for (const QString &old : dir.entryList({kProtonPrefix + QLatin1Char('*')}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (old != name) {
+                qInfo("Proton: removing old %s", qPrintable(old));
+                QDir(dir.filePath(old)).removeRecursively();
+            }
+        }
+        if (Component *c = find(m_current))
+            c->latest = name;   // finishCurrent запишет его в version
+        finishCurrent(true);
+    });
+    connect(tar, &QProcess::errorOccurred, this, [this, tar, archive](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart)
+            return;
+        tar->deleteLater();
+        QFile::remove(archive);
+        finishCurrent(false, tr("Не удалось распаковать Proton: нет программы tar."));
+    });
+    tar->start(QStringLiteral("tar"), {QStringLiteral("-xzf"), archive, QStringLiteral("-C"), staging});
 }

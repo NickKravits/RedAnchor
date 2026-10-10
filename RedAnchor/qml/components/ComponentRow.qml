@@ -1,7 +1,7 @@
 import QtQuick
 
-// Строка компонента (драйвер, Vulkan, Proton) для списков с моделью
-// ComponentsManager.components: название, состояние, прогресс установки.
+// Строка компонента (системные пакеты, драйвер, Vulkan, Steam, Proton, gogdl) для списков
+// с моделью ComponentsManager.components: название, состояние, прогресс установки.
 // ✕ — установить или обновить, если это нужно.
 ConsoleListItem {
     id: root
@@ -14,17 +14,32 @@ ConsoleListItem {
     required property string latest
     required property real progress
     required property string message
+    required property bool recommended
 
     readonly property bool actionable: status === "missing" || status === "update" || status === "failed"
 
-    icon: key === "drivers" ? "chip" : key === "vulkan" ? "vulkan" : key === "proton" ? "proton" : "store"
+    icon: {
+        switch (key) {
+        case "system": return "apps"
+        case "drivers": return "chip"
+        case "vulkan": return "vulkan"
+        case "steam": return "controller"
+        case "proton": return "proton"
+        default: return "store"
+        }
+    }
     title: name
     subtitle: {
         switch (status) {
         case "checking": return qsTr("Проверка…")
-        case "missing": return message !== "" ? message : qsTr("Не установлено") + " · " + description
+        case "missing":
+            if (message !== "")
+                return message
+            return (recommended ? qsTr("Не установлено") : qsTr("Не установлено, необязательно")) + " · " + description
         case "installed":
-            return qsTr("Установлено") + (version !== "" ? " · " + version : "") + (message !== "" ? " · " + message : "")
+            return qsTr("Установлено") + (version !== "" ? " · " + version : "")
+                   + (message !== "" ? " · " + message
+                      : key === "steam" ? " · " + qsTr("обновляется сам") : "")
         case "update": return qsTr("Доступно обновление: %1").arg(latest) + (version !== "" ? qsTr(" (сейчас %1)").arg(version) : "")
         case "queued": return qsTr("В очереди")
         case "installing": return message !== "" ? message : qsTr("Установка…")

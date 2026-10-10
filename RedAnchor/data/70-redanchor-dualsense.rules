@@ -5,3 +5,7 @@ ACTION=="add", SUBSYSTEM=="leds", KERNEL=="input*:rgb:indicator", RUN+="/bin/chm
 # Система раскладки RedAnchor: виртуальный контроллер Xbox для игр без поддержки DualSense.
 # Доступ к /dev/uinput получает пользователь активной сессии (как правило steam-devices).
 KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+
+# Тачпад DualSense / DualShock 4 — не мышь: иначе касания двигают курсор по экрану
+# (оболочка и так забирает тачпад себе, правило нужно, пока она не запущена).
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="*Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"

@@ -11,13 +11,14 @@
 class QProcess;
 class QTimer;
 
-// Запуск установленных игр через Proton (GE-Proton из «Настройки → Обновления»).
-//   GOG   — gogdl launch с Proton в качестве обёртки;
-//   Steam — исполняемый файл версии для Windows (параметры запуска — из данных приложения
-//           Steam через redanchor-steam). Игры с защитой Steam без клиента Steam могут не
-//           запуститься — клиент Steam в фоне появится позже.
-// У каждой игры свой префикс Wine в профиле пользователя: profiles/<id>/prefixes/<магазин>_<appId>.
-// Вывод игры пишется в profiles/<id>/logs/<магазин>_<appId>.log.
+// Запуск установленных игр.
+//   Steam — через клиент Steam (steam -applaunch): Proton, среда выполнения, защита от
+//           копирования, облачные сохранения и сетевая игра — как в обычном Steam;
+//   GOG   — gogdl launch с GE-Proton («Настройки → Обновления») в качестве обёртки.
+//           У каждой игры GOG свой префикс Wine в профиле пользователя:
+//           profiles/<id>/prefixes/gog_<appId>, вывод игры — в profiles/<id>/logs/gog_<appId>.log.
+// Игра считается идущей, пока живы её процессы (а не только запустивший её процесс:
+// лаунчеры часто запускают игру и сразу выходят).
 class GameLauncher : public QObject
 {
     Q_OBJECT
@@ -60,9 +61,13 @@ public:
 private:
     void setState(const QString &state, const QString &message = QString());
     QString protonPath() const;
-    void start(const QString &program, const QStringList &args, const QString &workingDir, const QString &appIdForSteam);
-    // Процессы самой игры (Wine), а не Proton/gogdl: по папке игры в командной строке
+    void start(const QString &program, const QStringList &args, const QString &workingDir);
+    void launchSteam(const QString &appId);
+    void startWatch();
+    // Процессы самой игры: Steam — reaper и всё с SteamAppId игры; GOG — файлы из папки игры
+    // и всё, что запущено в её префиксе Wine
     QList<qint64> gamePids() const;
+    bool isSteam() const;
     void checkStarted();
     void fail(const QString &message);
     void killGame();
@@ -83,6 +88,10 @@ private:
     QString m_relaunch;     // id игры, которую запустить после закрытия (перезапуск)
     QString m_inputMode;
     QProcess *m_process = nullptr;
+    bool m_processDone = false;     // процесс запуска (Proton, gogdl) уже вышел
+    qint64 m_lastSeen = 0;          // мс от m_started, когда процессы игры видели последний раз
+    QString m_prefix;               // префикс Wine (GOG)
+    QString m_proton;               // каталог GE-Proton (GOG)
     QElapsedTimer m_started;
     QTimer *m_watch = nullptr;
 };

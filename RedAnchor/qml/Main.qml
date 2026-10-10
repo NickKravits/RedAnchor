@@ -111,11 +111,13 @@ ApplicationWindow {
     AppBackground {
         anchors.fill: parent
         animated: !(window.page && window.page.immersive) && GameLauncher.state !== "running"
+        // Затемнение переднего плана — везде, кроме экрана выбора пользователя
+        dimmed: !(window.page && window.page.objectName === "userSelect")
     }
     // Однотонный фон для экранов на весь экран (магазин)
     Rectangle {
         anchors.fill: parent
-        color: "#070b16"
+        color: "#15181d"
         opacity: window.page && window.page.immersive ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: Theme.animNormal } }
@@ -165,7 +167,7 @@ ApplicationWindow {
     }
     Component {
         id: userSelectPage
-        UserSelectScreen { onChosen: window.go(homePage) }
+        UserSelectScreen { objectName: "userSelect"; onChosen: window.go(homePage) }
     }
     Component {
         id: newControllerPage
@@ -190,6 +192,8 @@ ApplicationWindow {
             login.hide()
             login.destroy()
             window.requestActivate()
+            // Фокус мог остаться на кнопке, которой больше нет (после входа она исчезает)
+            Qt.callLater(window.ensureFocus)
         })
         login.show()
     }
@@ -352,13 +356,63 @@ ApplicationWindow {
         anchors.fill: parent
         z: 30
     }
-    // Пока идёт игра, геймпад не должен управлять оболочкой в фоне (кроме оверлея по PS)
+    // Steam Big Picture поверх оболочки (вход в Steam, магазин Steam)
+    SteamScreen {
+        id: steamScreen
+        anchors.fill: parent
+        z: 29
+    }
+    readonly property string steamPhase: (StoreManager.stores.steam || {}).phase || ""
+    readonly property bool steamShown: steamPhase === "signin" || steamPhase === "bigpicture"
+    // Пока идёт игра или открыт Steam, геймпад не должен управлять оболочкой в фоне
+    // (кроме оверлея по PS)
     Binding {
         target: GamepadManager
         property: "keyEventsEnabled"
         value: false
-        when: GameLauncher.state === "running" && !systemOverlay.opened
+        when: (GameLauncher.state === "running" || window.steamShown) && !systemOverlay.opened
     }
+
+    // ---------- Фокус ----------
+    // Элемент с фокусом может исчезнуть (кнопка «Войти» после входа, форма после выхода,
+    // окно браузера закрылось) — тогда нажатия геймпада уходят «в никуда». Перед каждым
+    // нажатием проверяем фокус и, если он потерян, возвращаем его на текущий экран.
+    function focusUsable(item) {
+        if (!item || item === window.contentItem)
+            return false
+        for (let it = item; it; it = it.parent) {
+            if (!it.visible || !it.enabled || it.opacity === 0)
+                return false
+        }
+        return true
+    }
+    function ensureFocus() {
+        // Открыта клавиатура или оверлей — у них свой фокус
+        if (Keyboard.active || systemOverlay.opened)
+            return
+        const item = window.activeFocusItem
+        // Окно не в фокусе и не получило его обратно — нажатия идут другому окну (браузеру)
+        if (!item && !window.active)
+            return
+        if (focusUsable(item))
+            return
+        const page = stack.currentItem
+        if (!page)
+            return
+        console.info("Focus lost, restoring to", page.objectName || "page")
+        if (page.focusContent)
+            page.focusContent()
+        else if (page.initialFocus)
+            page.initialFocus.forceActiveFocus()
+        else
+            page.forceActiveFocus()
+    }
+    Connections {
+        target: GamepadManager
+        // Нажатие ещё в очереди событий — успеваем вернуть фокус до его обработки
+        function onButtonPressed(button) { window.ensureFocus() }
+    }
+    onActiveChanged: if (active) Qt.callLater(window.ensureFocus)
     // Система раскладки RedAnchor: игре без поддержки DualSense — виртуальный контроллер Xbox.
     // Создаётся до запуска игры, чтобы она увидела его сразу.
     Binding {

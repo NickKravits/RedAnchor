@@ -57,7 +57,7 @@ FocusScope {
         anchors.fill: parent
         anchors.margins: -Theme.px(32)
         radius: Theme.px(24)
-        color: Qt.rgba(0.02, 0.035, 0.09, 0.82)
+        color: Qt.rgba(0.06, 0.068, 0.08, 0.82)
         border.width: 1
         border.color: Qt.rgba(1, 1, 1, 0.08)
     }

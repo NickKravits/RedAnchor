@@ -18,7 +18,7 @@ Column {
         width: Theme.px(132)
         height: width
         radius: width / 2
-        color: Qt.rgba(0.03, 0.05, 0.12, 0.7)
+        color: Qt.rgba(0.08, 0.09, 0.105, 0.7)
         border.width: 1
         border.color: Qt.rgba(1, 1, 1, 0.18)
 

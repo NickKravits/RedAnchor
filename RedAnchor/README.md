@@ -54,22 +54,37 @@
 Пока фокус в магазине, он раскрывается на весь экран: верхняя строка (аккаунт, время) скрывается,
 фон становится однотонным, вкладки и разделы — компактнее.
 
-Загрузчики игр (DepotDownloader для Steam, gogdl для GOG) ставятся и обновляются в
-**Настройки → Обновления**; если загрузчика нет, магазин предлагает установить обновления там.
+Клиент Steam и загрузчик gogdl для GOG ставятся в **Настройки → Обновления**; если их нет,
+магазин предлагает установить обновления там.
 
-- **Steam** — вход по QR-коду из мобильного приложения Steam или по логину и паролю с
-  подтверждением Steam Guard (через DepotDownloader, он же качает игры). Библиотеку игр, имя
-  профиля и аватар получает помощник `redanchor-steam` на SteamKit2 (`tools/steam/`) — тем же
-  сохранённым входом. Для его сборки нужен .NET SDK 8 или новее (`apt search dotnet-sdk`, затем
-  `sudo apt install dotnet-sdk-<версия>`), CMake собирает его под установленную версию;
-  без него оболочка соберётся, но библиотека Steam будет недоступна.
+- **Steam** — официальный клиент Steam (обновляется сам). На одного пользователя консоли —
+  один аккаунт Steam: у каждого пользователя свой каталог клиента (клиент запускается с
+  `HOME=profiles/<id>/stores/steam/home`). Вход — **один раз**: «Войти в Steam» открывает
+  Steam Big Picture поверх оболочки (в gamescope, как игру), войти можно геймпадом или по
+  QR-коду из мобильного приложения Steam. Как только вход удался, Big Picture закрывается сам,
+  а клиент дальше работает в фоне (`-silent`) и сам входит при каждом запуске оболочки.
+  - **Библиотека** читается из файлов клиента: купленные игры — `appcache/packageinfo.vdf`
+    (пакеты лицензий, в том числе семейная библиотека) и `appcache/appinfo.vdf` (названия, типы),
+    установленные — `steamapps/appmanifest_*.acf` во всех папках библиотек. Игры, установленные
+    через Big Picture, тоже сразу появляются в оболочке.
+  - **Установка** — прямо из оболочки: оболочка кладёт в библиотеку клиента appmanifest игры
+    с флагом «нужно обновление» и высоким приоритетом и перезапускает клиент в фоне — Steam
+    сам начинает загрузку, прогресс виден в оболочке. Если Steam за пару минут не начал
+    загрузку сам, у игры появляется «Подтвердите в Steam» — откроется окно установки Big Picture.
+  - **Открыть Steam** — Big Picture поверх оболочки (магазин Steam, покупки, настройки);
+    вернуться — PS → Steam → «Вернуться в RedAnchor».
+  - Клиент настраивается сам: Steam Play для всех игр Windows (Proton Experimental — его
+    Steam ставит и обновляет сам), Steam Input для геймпадов PlayStation выключен (геймпадом
+    управляет оболочка — иначе Steam в фоне превращал бы геймпад в мышь и клавиатуру).
 - **GOG** — gogdl. Вход через встроенный браузер (отдельное окно, Qt WebEngine), управляемый
   геймпадом: крестовина выбирает элементы страницы, ✕ нажимает (на поле ввода — экранная
   клавиатура), △ отправляет форму, ○ — отмена, правый стик — курсор (только в этом окне).
 
 У каждого пользователя консоли свои входы в магазины и свои игры — всё лежит в его профиле:
-`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/<магазин>/`. Удаление учётной записи
-удаляет и её игры. При смене пользователя текущие загрузки останавливаются.
+`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/gog/` (игры Steam — в библиотеке его
+клиента, `stores/steam/home/.local/share/Steam/steamapps`). Удаление учётной записи удаляет и
+её игры. При смене пользователя загрузки GOG останавливаются, клиент Steam прежнего
+пользователя закрывается, а нового — запускается.
 
 Поставленная на загрузку игра сразу появляется в **Библиотеке** (с прогрессом) — её уже можно
 закрепить на главном экране; во вкладке **Мои игры** закреплённые игры идут рядом крупных
@@ -88,13 +103,26 @@
 перед установкой предупреждаем о системе раскладки RedAnchor (управление может быть неточным,
 значки — некорректными); если только мышь и клавиатура — что играть на геймпаде не получится.
 
-**Запуск игр** — ✕ в «Моих играх» и библиотеке, меню игры — Options. Игры запускаются через
-GE-Proton (Настройки → Обновления): GOG — `gogdl launch` с Proton-обёрткой, Steam — исполняемый
-файл версии для Windows (параметры запуска — из данных приложения Steam через `redanchor-steam`).
-У каждой игры свой префикс Wine в профиле пользователя (`profiles/<id>/prefixes/`), вывод игры —
-в `profiles/<id>/logs/`. Пока игра запускается, показывается её фон и название; если игра
-официально не поддерживает DualSense — рисунок DualSense и предупреждение о системе ввода RedAnchor.
-Игры с защитой Steam без запущенного клиента Steam могут не запуститься (клиент — следующий этап).
+**Запуск игр** — ✕ в «Моих играх» и библиотеке, меню игры — Options.
+- **Steam** — через клиент Steam (`steam -applaunch`): Proton, среда выполнения, защита от
+  копирования (DRM), облачные сохранения и сетевая игра работают как в обычном Steam.
+  У установленных игр в параметрах запуска стоит обёртка оболочки
+  (`~/.local/share/redanchor/steam-game-wrapper %command%`): перед запуском оболочка кладёт рядом
+  настройки ввода игры. Если Steam при первом запуске ждёт подтверждения (соглашение, выбор
+  режима), на экране запуска △ открывает Steam.
+- **GOG** — `gogdl launch` с GE-Proton (Настройки → Обновления) в качестве обёртки. У каждой игры
+  свой префикс Wine (`profiles/<id>/prefixes/`), вывод — в `profiles/<id>/logs/`.
+
+Игра считается запущенной, пока живы её процессы (лаунчеры часто запускают игру и выходят), —
+до этого оболочка показывает фон и название игры; если игра официально не поддерживает
+DualSense — рисунок DualSense и предупреждение о системе раскладки. Закрыть игру — PS → игра →
+«Закрыть игру» (у GOG закрывается и весь сеанс Wine игры). Журнал клиента Steam —
+`profiles/<id>/logs/steam.log`.
+
+**Геймпад.** Тачпад DualSense / DualShock 4 система считает мышью — касания двигали бы курсор.
+Оболочка забирает тачпад себе, а правило udev (`70-redanchor-dualsense.rules`) скрывает его от
+libinput ещё до запуска оболочки. Если после закрытия окна (браузер входа) или обновления
+раздела фокус пропадает, оболочка возвращает его сама перед следующим нажатием.
 
 ### Компоненты для игр (Ubuntu / Debian)
 
@@ -102,12 +130,16 @@ GE-Proton (Настройки → Обновления): GOG — `gogdl launch` 
   (на Debian — `nvidia-driver` из non-free) и его 32-битная часть; заработает после перезагрузки.
   AMD и Intel — Mesa (`libgl1-mesa-dri`, 64 и 32 бита) и прошивки.
 - **Vulkan.** `libvulkan1`, `mesa-vulkan-drivers` (64 и 32 бита) и `vulkan-tools`.
-- **DepotDownloader, gogdl.** Загрузчики игр Steam и GOG — последние выпуски с GitHub,
+- **Системные компоненты.** gamescope (и cage про запас), Xwayland, `libxcb-cursor0`, Python 3
+  (на нём написан Proton), PipeWire/WirePlumber, шрифт Inter, BlueZ, NetworkManager.
+- **Steam.** Официальный клиент (`steam-installer` из multiverse/contrib, иначе `steam_latest.deb`
+  от Valve), `steam-devices` и 32-битные библиотеки. Обновляется сам — состояния «обновление» нет.
+- **gogdl.** Загрузчик игр GOG — последний выпуск с GitHub,
   в `~/.local/share/RedAnchor/RedAnchor Shell/tools/`.
 - **Proton.** Последний GE-Proton с GitHub, проверяется по SHA-512 и распаковывается в
   `~/.local/share/RedAnchor/RedAnchor Shell/compatibilitytools/`; старые версии удаляются.
 
-Драйверы и Vulkan ставит помощник `redanchor-components` (apt, от root через `pkexec`;
+Системные компоненты, драйверы, Vulkan и Steam ставит помощник `redanchor-components` (apt, от root через `pkexec`;
 правило polkit `org.redanchor.shell.components` разрешает это активной сессии без пароля),
 при необходимости он включает 32-битную архитектуру (`dpkg --add-architecture i386`).
 Proton скачивается без прав root.
@@ -155,6 +187,75 @@ Proton скачивается без прав root.
 
 Геймпад читается напрямую из `/dev/input/event*` (evdev). Нажатия превращаются
 в обычные клавиатурные события, поэтому интерфейс одинаково работает и с мышью/клавиатурой.
+
+## Зависимости и установка
+
+Всё ставится одной командой — от обычного пользователя, права root скрипт попросит через `sudo`:
+
+```sh
+./install.sh              # пакеты, драйверы, Steam, Qt ≥ 6.10, сборка и установка сессии
+./install.sh --deps-only  # только системные пакеты (без Qt из aqtinstall и без сборки)
+./install.sh --no-build   # пакеты и Qt, но без сборки
+./install.sh --yes        # без вопросов (например, по ssh)
+```
+
+Скрипт идёт по шагам `[n/N]` и пишет подробности в `~/.local/state/redanchor/install.log`;
+повторный запуск безопасен. Что он делает:
+
+1. Проверяет систему (Ubuntu 24.04+ / Debian 12+, x86_64), включает 32-битную архитектуру
+   (`dpkg --add-architecture i386`), доделывает прерванную установку пакетов (`dpkg --configure -a`)
+   и ждёт, пока dpkg освободит, например, `unattended-upgrades` (до 10 минут).
+2. Ставит инструменты сборки и библиотеки, нужные Qt.
+3. Вызывает `data/redanchor-components` с целями `system`, `drivers`, `vulkan`, `steam` — тот же
+   помощник, что ставит компоненты из «Настройки → Обновления». Он сам включает нужные компоненты
+   репозиториев (universe/multiverse в Ubuntu, contrib/non-free в Debian; PPA и чужие репозитории не трогает,
+   копии файлов источников — в `/var/backups/redanchor/`) и пропускает пакеты, которых нет в дистрибутиве.
+4. Ищет Qt ≥ 6.10: `QT_PREFIX`, затем `~/Qt/<версия>/gcc_64` (онлайн-установщик или aqtinstall),
+   затем системный Qt. В репозиториях Ubuntu 24.04 — Qt 6.4, в Debian 13 — 6.8, этого мало: скрипт
+   предложит поставить Qt через [aqtinstall](https://github.com/miurahr/aqtinstall) в `~/Qt`
+   (окружение Python — в `~/.local/share/redanchor-aqt`). Версия по умолчанию — 6.10.1,
+   другая: `QT_VERSION=6.11.0 ./install.sh`. Готовый Qt: `QT_PREFIX=~/Qt/6.12.0/gcc_64 ./install.sh`.
+5. Собирает (`build-release/`) и ставит оболочку (`sudo cmake --install`), перечитывает правила udev,
+   включает загрузку модуля `uinput` и добавляет пользователя в группу `input`.
+
+Proton (GE-Proton) и gogdl ставятся не скриптом, а самой оболочкой без прав root — на шаге мастера
+«Проверка обновлений» или в «Настройки → Обновления». Qt из `~/Qt` доступен только вашему
+пользователю: если сессией будут пользоваться другие учётные записи Linux, поставьте Qt в общий
+каталог (`QT_INSTALL_DIR=/opt/Qt`, каталог должен быть доступен на запись) или используйте системный Qt.
+
+### Зависимости сборки
+
+| Пакет (Ubuntu / Debian) | Зачем |
+|---|---|
+| Qt ≥ 6.10: Core, Gui, Qml, Quick, QuickControls2, DBus, Network, Concurrent, Multimedia, WebEngineQuick (+ WebChannel, Positioning), ShaderTools | интерфейс, D-Bus (BlueZ, NetworkManager, logind), сеть, видео-фоны, вход GOG во встроенном браузере, сборка шейдера `aurora.frag` в `.qsb`. В системе — `qt6-base-dev qt6-declarative-dev qt6-multimedia-dev qt6-webengine-dev qt6-shadertools-dev` и модули `qml6-module-*`, если их версия ≥ 6.10; иначе Qt через aqtinstall |
+| `build-essential` (g++ с C++17), `cmake` ≥ 3.16, `pkg-config`, `ninja-build` (по желанию) | сборка |
+| `libgl-dev`, `libegl-dev`, `libxkbcommon-dev`, `libvulkan-dev`, `libfontconfig-dev` | заголовки, которые ищет CMake-пакет Qt6Gui |
+| `python3-venv` | окружение для aqtinstall |
+
+### Зависимости времени работы
+
+| Пакет | Зачем | Цель помощника |
+|---|---|---|
+| `gamescope` (+ `xwayland`) | композитор сессии, в нём же идут игры и Steam Big Picture | `system` |
+| `cage` | запасной композитор (если gamescope нет или не запустился) | `system` |
+| `libxcb-cursor0` и прочие `libxcb-*`, `libxkbcommon-x11-0` | Qt работает внутри gamescope через Xwayland (xcb) | `system` / install.sh |
+| `libnss3`, `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libxtst6`, `libxkbfile1`, `libasound2t64`, `libpulse0` | QtWebEngine и QtMultimedia из aqtinstall | install.sh |
+| `python3` | `proton` (GE-Proton) — скрипт на Python | `system` |
+| `pipewire`, `pipewire-pulse`, `wireplumber` (`wpctl`) или `pulseaudio-utils` (`pactl`) | громкость в оверлее | `system` |
+| `fonts-inter` | шрифт интерфейса (без него — системный sans) | `system` |
+| `bluez` | Bluetooth и сопряжение DualSense | `system` |
+| `network-manager` | Wi-Fi и сеть | `system` |
+| `polkitd` + `pkexec` (`policykit-1` в Debian 12) | помощники сопряжения и установки компонентов без пароля | `system` |
+| `systemd` (logind), `udev` | питание, доступ к геймпадам (`uaccess`), `/dev/uinput` | есть в системе |
+| `util-linux` (`script`), `tar`, `coreutils` (`sha512sum`), `curl` | запуск инструментов с псевдотерминалом, распаковка и проверка Proton, загрузка Steam | есть в системе / `system` |
+| Драйвер: `nvidia-driver-*` + `libnvidia-gl-*:i386` или `libgl1-mesa-dri` (64 и 32 бита), `mesa-va-drivers`, `linux-firmware` | графика для игр | `drivers` |
+| `libvulkan1`, `mesa-vulkan-drivers` (64 и 32 бита), `vulkan-tools` | Vulkan для DXVK/VKD3D в Proton | `vulkan` |
+| `steam-installer` (Ubuntu multiverse, Debian contrib) или `steam-launcher` из `steam_latest.deb` Valve; `steam-devices`; `steam-libs-*`, `libc6:i386`, `libgl1:i386`, `libvulkan1:i386` | официальный клиент Steam: библиотека, загрузка и запуск игр через Proton Experimental; правила udev для контроллеров | `steam` |
+| GE-Proton, gogdl | игры GOG | ставит оболочка |
+
+Цели помощника можно запускать и вручную: `sudo bash data/redanchor-components steam`
+(после установки — `pkexec /usr/local/libexec/redanchor-components steam`). Он печатает строки
+`PROGRESS <0..100> <текст>`, вывод apt — в stderr.
 
 ## Сборка и запуск
 
@@ -204,11 +305,11 @@ udev переподключите геймпад (или выполните `sud
 
 ```
 src/        C++: GamepadManager (evdev), BluetoothManager (BlueZ D-Bus),
-            StoreManager (магазины), GameLibrary (игры пользователя), GameArt (SteamGridDB),
+            StoreManager (магазины), SteamClient (клиент Steam), Vdf (файлы Steam),
+            GameLibrary (игры пользователя), GameLauncher (запуск), GameArt (SteamGridDB),
             NetworkBackend (NetworkManager D-Bus), AccountManager (учётные записи),
             SystemInfo (сведения о системе)
 src/pairhelper/  помощник сопряжения DualSense по кабелю (root, через pkexec)
-tools/steam/     помощник redanchor-steam на SteamKit2 (C#, .NET 8): библиотека и профиль Steam
 data/       правило polkit для помощника, правило udev для световой панели
 qml/        Main.qml, Theme (палитра/масштаб), Keyboard (мост к экранной клавиатуре)
 qml/components/  DualSense, UsbCable, OnScreenKeyboard, кнопки, списки, поля…

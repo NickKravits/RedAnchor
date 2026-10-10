@@ -5,7 +5,6 @@ project(RedAnchor VERSION 0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(ZLIB REQUIRED)   # чтение сжатых настроек DepotDownloader
 find_package(Qt6 REQUIRED COMPONENTS Quick QuickControls2 DBus Network Concurrent Multimedia WebEngineQuick ShaderTools)
 
 qt_standard_project_setup(REQUIRES 6.10)
@@ -52,6 +51,7 @@ set(QML_SOURCES
     qml/components/RoundedClip.qml
     qml/components/Compat.js
     qml/components/GameLaunchOverlay.qml
+    qml/components/SteamScreen.qml
     qml/components/SystemOverlay.qml
     qml/components/Format.js
     qml/setup/ControllerScreen.qml
@@ -105,6 +105,8 @@ qt_add_qml_module(appRedAnchor
         src/gameart.h src/gameart.cpp
         src/storemanager.h src/storemanager.cpp
         src/gamelauncher.h src/gamelauncher.cpp
+        src/vdf.h src/vdf.cpp
+        src/steamclient.h src/steamclient.cpp
 )
 
 include(GNUInstallDirs)
@@ -123,39 +125,6 @@ file(COPY data/redanchor-components DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
      FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 configure_file(data/org.redanchor.shell.policy.in org.redanchor.shell.policy @ONLY)
 
-# Помощник Steam на SteamKit2 (библиотека игр, имя и аватар профиля). Нужен .NET SDK 8 или новее
-# (в Ubuntu: apt search dotnet-sdk → например sudo apt install dotnet-sdk-10.0).
-# Собирается под установленную версию SDK в один исполняемый файл со встроенной средой .NET.
-set(STEAM_HELPER_PATH "${CMAKE_INSTALL_FULL_LIBEXECDIR}/redanchor-steam")
-find_program(DOTNET_EXECUTABLE dotnet)
-if(DOTNET_EXECUTABLE)
-    execute_process(COMMAND ${DOTNET_EXECUTABLE} --version
-                    OUTPUT_VARIABLE DOTNET_SDK_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-    string(REGEX MATCH "^[0-9]+" DOTNET_SDK_MAJOR "${DOTNET_SDK_VERSION}")
-endif()
-if(DOTNET_EXECUTABLE AND DOTNET_SDK_MAJOR AND DOTNET_SDK_MAJOR GREATER_EQUAL 8)
-    message(STATUS "redanchor-steam: .NET SDK ${DOTNET_SDK_VERSION}, цель net${DOTNET_SDK_MAJOR}.0")
-    set(STEAM_HELPER_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/steam/RedAnchorSteam.csproj
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/steam/Program.cs)
-    add_custom_command(
-        OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/redanchor-steam
-        COMMAND ${DOTNET_EXECUTABLE} publish ${CMAKE_CURRENT_SOURCE_DIR}/tools/steam/RedAnchorSteam.csproj
-                -c Release -r linux-x64 --self-contained true -p:RedAnchorDotnetMajor=${DOTNET_SDK_MAJOR}
-                -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-                -o ${CMAKE_CURRENT_BINARY_DIR}/steam-helper
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/steam-helper/redanchor-steam
-                ${CMAKE_CURRENT_BINARY_DIR}/redanchor-steam
-        DEPENDS ${STEAM_HELPER_SOURCES}
-        COMMENT "Сборка redanchor-steam (SteamKit2)"
-        VERBATIM)
-    add_custom_target(redanchor-steam ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/redanchor-steam)
-    install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/redanchor-steam DESTINATION ${CMAKE_INSTALL_LIBEXECDIR})
-else()
-    message(WARNING "Не найден .NET SDK 8 или новее: redanchor-steam (библиотека Steam) собран не будет. "
-                    "Установите SDK: apt search dotnet-sdk, затем sudo apt install dotnet-sdk-<версия>")
-endif()
-
 # Шейдеры компилируются в .qsb при сборке и кладутся рядом с QML-файлами модуля
 qt_add_shaders(appRedAnchor "redanchor_shaders"
     PREFIX "/qt/qml/RedAnchor"
@@ -167,7 +136,6 @@ target_compile_definitions(appRedAnchor PRIVATE
     PROJECT_VERSION_STRING="${PROJECT_VERSION}"
     REDANCHOR_PAIR_HELPER="${PAIR_HELPER_PATH}"
     REDANCHOR_COMPONENTS_HELPER="${COMPONENTS_HELPER_PATH}"
-    REDANCHOR_STEAM_HELPER="${STEAM_HELPER_PATH}"
     REDANCHOR_STEAMGRIDDB_KEY="${REDANCHOR_STEAMGRIDDB_KEY}"
 )
 add_dependencies(appRedAnchor redanchor-pair-controller)
@@ -184,7 +152,7 @@ if(QT6_INSTALL_PREFIX AND NOT QT6_INSTALL_PREFIX MATCHES "^/usr/?$")
 endif()
 
 target_link_libraries(appRedAnchor
-    PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Network Qt6::Concurrent Qt6::Multimedia Qt6::WebEngineQuick ZLIB::ZLIB
+    PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Network Qt6::Concurrent Qt6::Multimedia Qt6::WebEngineQuick
 )
 
 install(TARGETS appRedAnchor
