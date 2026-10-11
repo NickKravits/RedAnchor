@@ -31,27 +31,30 @@ Popup {
 
     parent: Overlay.overlay
     anchors.centerIn: parent
-    width: Theme.px(640)
+    width: Math.min(Theme.px(660), parent ? parent.width - 2 * Theme.px(40) : Theme.px(660))
     padding: Theme.px(44)
+    topPadding: Theme.px(40)
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
 
-    Overlay.modal: Rectangle { color: Qt.rgba(0.02, 0.022, 0.026, 0.72) }
+    // Затемнение под меню
+    Overlay.modal: Rectangle { color: Theme.scrim }
 
-    background: Rectangle {
-        radius: Theme.radius * 1.5
-        color: "#1b1e24"
-        border.width: 1
-        border.color: Theme.outline
+    background: GlassPanel {
+        strong: true
+        radius: Theme.radiusLarge
+        // Почти непрозрачное: под меню не должны читаться обложки
+        color: Qt.rgba(0.072, 0.078, 0.092, 0.97)
     }
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animNormal }
-        NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: Theme.animNormal; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.animNormal; easing.type: Easing.OutCubic }
+        NumberAnimation { property: "scale"; from: 0.94; to: 1; duration: Theme.animNormal; easing.type: Easing.OutQuint }
     }
     exit: Transition {
         NumberAnimation { property: "opacity"; to: 0; duration: Theme.animFast }
+        NumberAnimation { property: "scale"; to: 0.97; duration: Theme.animFast }
     }
 
     onOpened: {
@@ -77,7 +80,8 @@ Popup {
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontLarge
-            font.weight: Font.Light
+            font.weight: Font.Normal
+            font.letterSpacing: Theme.trackingTight
             wrapMode: Text.WordWrap
         }
         Text {
@@ -90,11 +94,11 @@ Popup {
             lineHeight: 1.2
             wrapMode: Text.WordWrap
         }
-        Item { width: 1; height: Theme.px(10) }
+        Item { width: 1; height: Theme.px(14) }
 
         Column {
             width: parent.width
-            spacing: Theme.px(14)
+            spacing: Theme.px(16)
 
             Repeater {
                 id: buttons

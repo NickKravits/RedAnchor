@@ -33,12 +33,14 @@ Item {
     implicitHeight: size
     implicitWidth: isSymbol ? size : Math.max(size, labelText.implicitWidth + size * 0.6)
 
+    // Плашка кнопки: лёгкая заливка и тонкая кромка, как у кнопок самого геймпада
     Rectangle {
         anchors.fill: parent
-        radius: root.isSymbol ? width / 2 : height * 0.3
-        color: "transparent"
-        border.color: Theme.outlineStrong
+        radius: root.isSymbol ? width / 2 : height * 0.32
+        color: Qt.rgba(1, 1, 1, 0.08)
+        border.color: Qt.rgba(1, 1, 1, 0.30)
         border.width: 1
+        antialiasing: true
     }
 
     Shape {
@@ -50,7 +52,7 @@ Item {
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
             strokeColor: Theme.textPrimary
-            strokeWidth: 1.5
+            strokeWidth: 1.7
             fillColor: "transparent"
             capStyle: ShapePath.RoundCap
             joinStyle: ShapePath.RoundJoin
@@ -65,8 +67,8 @@ Item {
         text: root.label
         color: Theme.textPrimary
         font.family: Theme.fontFamily
-        font.pixelSize: root.size * (text.length > 3 ? 0.36 : 0.44)
-        font.weight: Font.Medium
+        font.pixelSize: root.size * (text.length > 3 ? 0.34 : 0.42)
+        font.weight: Font.DemiBold
         font.letterSpacing: text.length > 3 ? 0.5 : 0
     }
 }

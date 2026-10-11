@@ -98,7 +98,8 @@ FocusScope {
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontDisplay
-            font.weight: Font.Light
+            font.weight: Font.Normal
+            font.letterSpacing: Theme.trackingTight * 2
             wrapMode: Text.WordWrap
         }
 
@@ -133,15 +134,15 @@ FocusScope {
         Rectangle {
             visible: root.warn
             width: parent.width
-            height: warningText.implicitHeight + Theme.px(40)
-            radius: Theme.radius
-            color: Qt.rgba(0.94, 0.71, 0.3, 0.12)
+            height: warningText.implicitHeight + Theme.px(44)
+            radius: Theme.radiusLarge
+            color: Qt.rgba(0.2, 0.15, 0.06, 0.72)
             border.width: 1
             border.color: Qt.rgba(0.94, 0.71, 0.3, 0.45)
 
             Row {
                 anchors.fill: parent
-                anchors.margins: Theme.px(20)
+                anchors.margins: Theme.px(22)
                 spacing: Theme.px(16)
                 Icon {
                     name: root.compat.level === "keyboard" ? "warning" : "controller"

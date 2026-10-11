@@ -38,7 +38,7 @@ FocusScope {
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontTitle
             font.weight: Font.Light
-            font.letterSpacing: -0.5
+            font.letterSpacing: Theme.trackingTight
             wrapMode: Text.WordWrap
         }
         Text {
@@ -48,7 +48,7 @@ FocusScope {
             color: Theme.textSecondary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
-            lineHeight: 1.25
+            lineHeight: 1.3
             wrapMode: Text.WordWrap
         }
         // Подзаголовок со значками кнопок: «Нажмите {cross}, чтобы продолжить»

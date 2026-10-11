@@ -17,7 +17,7 @@ Item {
         preferredRendererType: Shape.CurveRenderer
 
         ShapePath {
-            strokeColor: Qt.rgba(1, 1, 1, 0.10)
+            strokeColor: Qt.rgba(1, 1, 1, 0.14)
             strokeWidth: Math.max(1.5, root.size * 0.06)
             fillColor: "transparent"
             PathAngleArc {

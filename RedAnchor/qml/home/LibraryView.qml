@@ -108,12 +108,15 @@ FocusScope {
             required property int index
             width: grid.cellWidth
             height: grid.cellHeight
+            // Выбранная плитка поверх соседей: её ореол не перекрывается
+            z: GridView.isCurrentItem ? 1 : 0
 
             readonly property var download: root.downloadOf(cell.modelData.id)
 
             GameCover {
+                id: cover
                 anchors.fill: parent
-                anchors.margins: Theme.px(14)
+                anchors.margins: Theme.px(18)
                 gameId: cell.modelData.id
                 store: cell.modelData.store
                 appId: cell.modelData.appId
@@ -121,27 +124,18 @@ FocusScope {
                 status: cell.modelData.installed ? "" : (cell.download ? cell.download.status : "queued")
                 progress: cell.download ? cell.download.progress : -1
                 active: cell.GridView.isCurrentItem && grid.activeFocus
-                scale: active ? 1.04 : 1
-                Behavior on scale { NumberAnimation { duration: Theme.animFast; easing.type: Easing.OutCubic } }
+                scale: active ? 1.05 : 1
+                Behavior on scale { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutQuint } }
             }
 
             // Закреплена на главном экране
-            Rectangle {
+            Badge {
                 visible: cell.modelData.pinned
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: Theme.px(22)
-                width: Theme.px(30)
-                height: width
-                radius: width / 2
-                color: Qt.rgba(0, 0, 0, 0.6)
-                Icon {
-                    anchors.centerIn: parent
-                    name: "pin"
-                    size: Theme.px(18)
-                    lineWidth: 1.8
-                    color: Theme.textPrimary
-                }
+                anchors.margins: Theme.px(24)
+                scale: cover.scale
+                icon: "pin"
             }
 
             MouseArea {
@@ -171,7 +165,8 @@ FocusScope {
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontLarge
-            font.weight: Font.Light
+            font.weight: Font.DemiBold
+            font.letterSpacing: Theme.trackingTight
         }
         Text {
             text: info.game.store ? root.statusText(info.game) + (info.game.pinned ? qsTr(" · на главном экране") : "") : ""
