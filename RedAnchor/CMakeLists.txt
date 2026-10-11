@@ -72,6 +72,17 @@ set(QML_SOURCES
     qml/home/StoreView.qml
     qml/home/StorePanel.qml
     qml/home/WebLoginWindow.qml
+    qml/home/StoreBrowserWindow.qml
+    qml/home/storefront/StorefrontView.qml
+    qml/home/storefront/StoreHero.qml
+    qml/home/storefront/StoreShelf.qml
+    qml/home/storefront/StoreTile.qml
+    qml/home/storefront/StorePrice.qml
+    qml/home/storefront/StoreShimmer.qml
+    qml/home/storefront/StoreSearchPage.qml
+    qml/home/storefront/StoreDetailsPage.qml
+    qml/home/storefront/StorePhoneDialog.qml
+    qml/home/storefront/Storefront.js
     qml/home/SettingsView.qml
     qml/home/settings/NetworkSettings.qml
     qml/home/settings/BluetoothSettings.qml
@@ -107,6 +118,10 @@ qt_add_qml_module(appRedAnchor
         src/gameart.h src/gameart.cpp
         src/storemanager.h src/storemanager.cpp
         src/gamelauncher.h src/gamelauncher.cpp
+        src/storecatalog.h src/storecatalog.cpp
+        src/storecatalogparser.h src/storecatalogparser.cpp
+        src/qrcode.h src/qrcode.cpp
+        src/third_party/qrcodegen/qrcodegen.hpp src/third_party/qrcodegen/qrcodegen.cpp
 )
 
 include(GNUInstallDirs)

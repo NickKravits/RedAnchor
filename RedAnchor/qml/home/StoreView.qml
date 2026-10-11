@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 
-// Вкладка «Магазин»: разделы RedStore, GOG.
+// Вкладка «Магазин»: Витрина (StorefrontView: каталог GOG и Epic), «Мои игры GOG», «Мои игры Epic», RedStore.
 // Фокус сначала попадает на панель разделов: ←/→ (или L2 / R2 откуда угодно) — магазин,
 // ↓ или ✕ — внутрь раздела, ↑ или ○ из раздела — обратно к панели разделов.
 FocusScope {
@@ -12,12 +12,17 @@ FocusScope {
     property bool compact: false
     property int section: 0
     readonly property var sections: [
-        { key: "redstore", title: "RedStore" },
-        { key: "gog", title: "GOG" },
-        { key: "epic", title: "Epic Games" }
+        { key: "showcase", title: qsTr("Витрина") },
+        { key: "gog", title: qsTr("Мои игры GOG") },
+        { key: "epic", title: qsTr("Мои игры Epic") },
+        { key: "redstore", title: "RedStore" }
     ]
 
     signal webLoginRequested(string store)
+
+    // Подсказки раздела, если он их задаёт (витрина), — пока фокус внутри раздела
+    readonly property var hints: content.item && content.item.activeFocus && content.item.hints
+                                 ? content.item.hints : undefined
 
     // L2 / R2 (вызывает главный экран) и ←/→ на панели разделов
     // enterContent — L2 / R2: фокус сразу на элементе раздела; ←/→ на панели разделов
@@ -163,11 +168,16 @@ FocusScope {
         anchors.top: sectionBar.bottom
         anchors.topMargin: root.compact ? Theme.px(20) : Theme.px(30)
         anchors.bottom: parent.bottom
-        sourceComponent: root.sections[root.section].key === "redstore" ? redStore : storePanel
+        sourceComponent: root.sections[root.section].key === "showcase" ? showcase
+                       : root.sections[root.section].key === "redstore" ? redStore : storePanel
         onLoaded: fade.restart()
         NumberAnimation { id: fade; target: content; property: "opacity"; from: 0; to: 1; duration: Theme.animNormal }
     }
 
+    Component {
+        id: showcase
+        StorefrontView {}
+    }
     Component {
         id: redStore
         Item {
