@@ -411,8 +411,9 @@ ensure_qt() {
     fail "Qt $QT_VERSION установлен в $QT_INSTALL_DIR/$QT_VERSION, но в нём не хватает модулей: ${QT_MISSING:-неизвестно}. Подробности — в $LOG"
 }
 
-# Зеркала Qt: основной сервер часто отдаёт файлы медленно или без контрольных сумм
-read -r -a AQT_MIRRORS <<<"${AQT_MIRRORS:-https://download.qt.io https://qt.mirror.constant.com https://mirrors.ocf.berkeley.edu/qt https://ftp.fau.de/qtproject}"
+# Зеркала Qt. download.qt.io из некоторых стран (в том числе из России) недоступен, поэтому
+# первыми идут европейские зеркала с полной копией репозитория
+read -r -a AQT_MIRRORS <<<"${AQT_MIRRORS:-https://ftp.fau.de/qtproject https://mirror.netcologne.de/qtproject https://mirrors.dotsrc.org/qtproject https://www.nic.funet.fi/pub/mirrors/download.qt-project.org https://download.qt.io https://mirrors.ocf.berkeley.edu/qt}"
 AQT_ERROR=""
 
 # aqt_install <сборка> [аргументы…] — ставит Qt $QT_VERSION, пробуя зеркала по очереди.
@@ -424,9 +425,12 @@ aqt_install() {
     for base in "${AQT_MIRRORS[@]}"; do
         echo "aqt install-qt $QT_VERSION $arch $* (зеркало $base)" >>"$LOG"
         : >"$alog"
+        # Контрольные суммы aqt по умолчанию берёт только с download.qt.io — если он недоступен,
+        # ни одно зеркало не помогает («Failed to download checksum»). Берём их с того же зеркала
+        printf '[aqt]\nbaseurl : %s\n\n[mirrors]\ntrusted_mirrors :\n    %s\n' "$base" "$base" >"$LOG_DIR/aqt-settings.ini"
         # aqt качает долго и молча — пока он работает, показываем время и его последнюю строку.
         # Запускаем из каталога журналов: aqt кладёт свой aqtinstall.log в текущий каталог
-        (cd "$LOG_DIR" && exec "$AQT_VENV/bin/aqt" install-qt linux desktop "$QT_VERSION" "$arch" \
+        (cd "$LOG_DIR" && exec "$AQT_VENV/bin/aqt" -c aqt-settings.ini install-qt linux desktop "$QT_VERSION" "$arch" \
             -O "$dest" -b "$base" --timeout 30 "$@") >"$alog" 2>&1 &
         pid=$!
         start=$SECONDS
