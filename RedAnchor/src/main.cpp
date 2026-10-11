@@ -1,4 +1,6 @@
 #include <QCommandLineParser>
+#include <QDir>
+#include <QFileInfo>
 #include <QFile>
 #include <QTimer>
 #include <QGuiApplication>
@@ -12,6 +14,38 @@
 
 #include <utility>
 
+namespace {
+
+// Видеокарта не годится для ускорения браузера: программный OpenGL (сессия без 3D-ускорения)
+// или виртуальная видеокарта. REDANCHOR_WEBENGINE_GPU=1 / 0 — принудительно с ускорением / без
+bool needsSoftwareWebEngine()
+{
+    const QByteArray forced = qgetenv("REDANCHOR_WEBENGINE_GPU");
+    if (!forced.isEmpty())
+        return forced == "0";
+    if (qgetenv("LIBGL_ALWAYS_SOFTWARE") == "1")
+        return true;
+    static const QStringList virtualDrivers = {
+        QStringLiteral("vmwgfx"), QStringLiteral("virtio_gpu"), QStringLiteral("virtio-gpu"),
+        QStringLiteral("qxl"), QStringLiteral("bochs"), QStringLiteral("bochs-drm"),
+        QStringLiteral("cirrus"), QStringLiteral("cirrus-qemu"), QStringLiteral("vboxvideo"),
+        QStringLiteral("hyperv_drm"), QStringLiteral("simpledrm"), QStringLiteral("vkms"),
+    };
+    bool anyCard = false;
+    const QDir drm(QStringLiteral("/sys/class/drm"));
+    for (const QString &card : drm.entryList({QStringLiteral("card?")}, QDir::Dirs | QDir::System)) {
+        const QString driver = QFileInfo(drm.filePath(card) + QStringLiteral("/device/driver")).symLinkTarget();
+        if (driver.isEmpty())
+            continue;
+        anyCard = true;
+        if (!virtualDrivers.contains(QFileInfo(driver).fileName()))
+            return false;   // есть настоящая видеокарта
+    }
+    return anyCard;
+}
+
+} // namespace
+
 int main(int argc, char *argv[])
 {
     // В сессии (--fullscreen) окнам не нужны рамки. Без этого Qt рисует свою рамку с заголовком
@@ -22,7 +56,17 @@ int main(int argc, char *argv[])
     }
     // Оверлей по кнопке PS — прозрачное окно поверх игры
     QQuickWindow::setDefaultAlphaBuffer(true);
-    // Встроенный браузер (вход в GOG) должен инициализироваться до приложения
+    // Встроенному браузеру (вход в магазины, покупки) без настоящей видеокарты нужна
+    // программная отрисовка: в виртуальной машине и при программном OpenGL Chromium с
+    // ускорением показывает чёрное окно. Флаги — до инициализации движка
+    if (needsSoftwareWebEngine()) {
+        QByteArray flags = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS");
+        if (!flags.contains("--disable-gpu"))
+            flags += " --disable-gpu --disable-gpu-compositing";
+        qputenv("QTWEBENGINE_CHROMIUM_FLAGS", flags.trimmed());
+        qInfo("WebEngine: software rendering (%s)", flags.trimmed().constData());
+    }
+    // Встроенный браузер должен инициализироваться до приложения
     QtWebEngineQuick::initialize();
     QGuiApplication app(argc, argv);
     QGuiApplication::setOrganizationName(QStringLiteral("RedAnchor"));

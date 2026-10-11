@@ -1,0 +1,80 @@
+#!/bin/sh
+# Сброс RedAnchor к заводскому состоянию (запускается от обычного пользователя, без root).
+#
+# Удаляет:
+#   - настройки оболочки (~/.config/RedAnchor): первичная настройка пройдёт заново,
+#     имена и цвета геймпадов, список пользователей;
+#   - всех пользователей консоли с их входами в магазины, установленными играми,
+#     сохранениями в префиксах Wine (~/.local/share/RedAnchor/RedAnchor Shell/profiles);
+#   - данные встроенного браузера и кэш оболочки (обложки, каталог магазинов);
+#   - все сопряжённые устройства Bluetooth (геймпады, наушники);
+#   - сохранённые сети Wi-Fi.
+# Не трогает «обновления»: системные пакеты, Proton, gogdl, legendary, umu-launcher
+# и среду Steam Runtime, которую скачал umu.
+#
+# Из оболочки сброс вызывает redanchor-session, когда оболочка уже закрыта
+# (Настройки → О системе → «Сбросить настройки»). Вручную: redanchor-reset [--yes]
+
+set -u
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/RedAnchor"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/RedAnchor/RedAnchor Shell"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/RedAnchor/RedAnchor Shell"
+
+log() { echo "redanchor-reset: $*"; }
+
+if [ "${1:-}" != "--yes" ]; then
+    echo "Будут удалены настройки RedAnchor, все пользователи консоли с их играми и входами"
+    echo "в магазины, сопряжённые устройства Bluetooth и сохранённые сети Wi-Fi."
+    echo "Обновления (Proton, gogdl, legendary, umu-launcher, системные пакеты) останутся."
+    printf 'Продолжить? [y/N] '
+    read -r answer || answer=
+    case "$answer" in
+        y|Y|д|Д|yes|да) ;;
+        *) echo "Отменено."; exit 1 ;;
+    esac
+fi
+
+# Оболочка не должна работать во время сброса: при выходе она записала бы настройки заново
+if pgrep -u "$(id -u)" -x redanchor-shell >/dev/null 2>&1; then
+    log "оболочка ещё работает — закройте её (или сбросьте из Настройки → О системе)"
+    exit 2
+fi
+
+log "настройки оболочки"
+rm -rf "$CONFIG_DIR"
+
+log "пользователи, их игры и данные браузера"
+rm -rf "$DATA_DIR/profiles" "$DATA_DIR/QtWebEngine"
+
+log "кэш"
+rm -rf "$CACHE_DIR"
+
+# Bluetooth: все сопряжённые устройства (BlueZ удаляет и ключи связи из /var/lib/bluetooth)
+if command -v bluetoothctl >/dev/null 2>&1; then
+    devices=$(bluetoothctl devices Paired 2>/dev/null)
+    [ -n "$devices" ] || devices=$(bluetoothctl paired-devices 2>/dev/null)
+    echo "$devices" | awk '$1 == "Device" { print $2 }' | while read -r mac; do
+        [ -n "$mac" ] || continue
+        if bluetoothctl remove "$mac" >/dev/null 2>&1; then
+            log "Bluetooth: удалено $mac"
+        else
+            log "Bluetooth: не удалось удалить $mac"
+        fi
+    done
+fi
+
+# Wi-Fi: сохранённые сети (проводные подключения не трогаем)
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli -t -f UUID,TYPE connection show 2>/dev/null | while IFS=: read -r uuid type; do
+        [ "$type" = "802-11-wireless" ] || continue
+        if nmcli connection delete uuid "$uuid" >/dev/null 2>&1; then
+            log "Wi-Fi: удалена сеть $uuid"
+        else
+            log "Wi-Fi: не удалось удалить сеть $uuid"
+        fi
+    done
+fi
+
+log "готово"
+exit 0

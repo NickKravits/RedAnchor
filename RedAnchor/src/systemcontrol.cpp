@@ -113,6 +113,26 @@ void SystemControl::setMuted(bool muted)
         QProcess::startDetached(QStringLiteral("pactl"), {QStringLiteral("set-sink-mute"), QStringLiteral("@DEFAULT_SINK@"), value});
 }
 
+void SystemControl::factoryReset()
+{
+    qInfo("Factory reset requested");
+    if (!qEnvironmentVariableIsEmpty("REDANCHOR_SESSION_COMPOSITOR")) {
+        // Код 42 — redanchor-session сам выполнит сброс, когда оболочка закроется
+        QCoreApplication::exit(42);
+        return;
+    }
+    // Оболочка запущена не из сессии: сбрасываем, как только она закроется
+    const QString script = QStandardPaths::findExecutable(QStringLiteral("redanchor-reset"));
+    if (script.isEmpty()) {
+        qWarning("Factory reset: redanchor-reset not found");
+        return;
+    }
+    QProcess::startDetached(QStringLiteral("sh"), {QStringLiteral("-c"),
+        QStringLiteral("while pgrep -u \"$(id -u)\" -x redanchor-shell >/dev/null; do sleep 0.5; done; exec \"$0\" --yes"),
+        script});
+    QCoreApplication::exit(0);
+}
+
 void SystemControl::logout()
 {
     qInfo("Logout requested");

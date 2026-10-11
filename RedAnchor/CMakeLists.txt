@@ -181,7 +181,7 @@ set(REDANCHOR_POLKIT_ACTIONS_DIR "/usr/share/polkit-1/actions" CACHE PATH "Ка�
 set(REDANCHOR_UDEV_RULES_DIR "/usr/lib/udev/rules.d" CACHE PATH "Каталог правил udev")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/org.redanchor.shell.policy DESTINATION ${REDANCHOR_POLKIT_ACTIONS_DIR})
 install(FILES data/70-redanchor-dualsense.rules DESTINATION ${REDANCHOR_UDEV_RULES_DIR})
-install(PROGRAMS session/redanchor-session DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(PROGRAMS session/redanchor-session session/redanchor-reset DESTINATION ${CMAKE_INSTALL_BINDIR})
 # Экран входа (GDM, SDDM) ищет сессии в /usr/share/wayland-sessions — путь не зависит от префикса,
 # а в файле сессии — полные пути: PATH у экрана входа может не содержать /usr/local/bin
 set(REDANCHOR_SESSIONS_DIR "/usr/share/wayland-sessions" CACHE PATH "Каталог сессий экрана входа")

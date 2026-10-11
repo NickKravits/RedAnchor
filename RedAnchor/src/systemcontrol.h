@@ -33,6 +33,9 @@ public:
     Q_INVOKABLE void setMuted(bool muted);
 
     Q_INVOKABLE void logout();
+    // Сброс к заводским настройкам (кроме обновлений): оболочка закрывается, сбрасывает
+    // redanchor-reset, сессия запускает оболочку заново — с первичной настройкой
+    Q_INVOKABLE void factoryReset();
     Q_INVOKABLE void reboot();
     Q_INVOKABLE void powerOff();
 
