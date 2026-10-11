@@ -323,6 +323,23 @@ int main(int argc, char *argv[])
     if (const auto it = stored.find("LinkKey"); it != stored.end() && it->second.count("Key"))
         key = parseKey(it->second.at("Key"));
     const bool newKey = !key;
+
+    // Контроллер уже сопряжён с этим адаптером (отчёт 0x09, байты 10..15 — адрес хоста),
+    // и у BlueZ есть ключ — ничего не трогаем. Иначе каждое подключение кабеля (зарядка)
+    // перезаписывало бы ключ в контроллере, а ключ от обычного сопряжения по Bluetooth
+    // (PS + Share) контроллер после такой записи уже не принимает: приходилось бы
+    // сопрягать заново.
+    if (!newKey && haveInfo) {
+        Address host{};
+        for (int i = 0; i < 6; ++i)
+            host[i] = info[15 - i];
+        if (host == *adapter) {
+            ::close(fd);
+            std::printf("paired %s existing\n", deviceMac.c_str());
+            return 0;
+        }
+    }
+
     if (newKey) {
         key.emplace();
         if (!randomKey(*key)) {

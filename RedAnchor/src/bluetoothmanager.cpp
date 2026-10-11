@@ -395,8 +395,11 @@ void BluetoothManager::checkDevice(const QString &path)
     m_resolving.insert(path);
     qInfo("Controller %s connected without known services, resolving",
           qPrintable(props.value(QStringLiteral("Address")).toString()));
-    // Одного Connect часто мало: контроллер успевает отключиться, пока BlueZ его опрашивает
+    // Одного Connect часто мало: контроллер успевает отключиться, пока BlueZ его опрашивает.
+    // Первый Connect — сразу, пока контроллер на связи: если повторы уже идут, их таймер
+    // мог бы отложить его на несколько секунд
     startConnectRetry(60);
+    QTimer::singleShot(0, this, &BluetoothManager::retryConnect);
 }
 
 bool BluetoothManager::isAllowedDevice(const QString &devicePath)
