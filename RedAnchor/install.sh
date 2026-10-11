@@ -272,17 +272,25 @@ helper_step() {
     fi
 }
 
+# Модули Qt, без которых оболочка не соберётся, и пакеты aqtinstall, в которых они лежат
+QT_REQUIRED_MODULES=(Qt6Quick Qt6QuickControls2 Qt6DBus Qt6Network Qt6Concurrent Qt6Multimedia Qt6WebEngineQuick Qt6ShaderTools)
+AQT_MODULES=(qtwebengine qtwebchannel qtpositioning qtmultimedia qtshadertools)
+# Каких модулей не хватило в последнем проверенном каталоге Qt
+QT_MISSING=""
+
 # Каталог Qt, в котором есть всё нужное оболочке, и его версия
 qt_prefix_version() {
     local prefix="$1" cfg
+    QT_MISSING=""
     for cfg in "$prefix/lib/cmake/Qt6/Qt6ConfigVersion.cmake" "$prefix/lib/x86_64-linux-gnu/cmake/Qt6/Qt6ConfigVersion.cmake"; do
         [[ -f $cfg ]] || continue
         local dir
         dir=$(dirname "$(dirname "$cfg")")
         local mod
-        for mod in Qt6Quick Qt6QuickControls2 Qt6DBus Qt6Network Qt6Concurrent Qt6Multimedia Qt6WebEngineQuick Qt6ShaderTools; do
-            [[ -d $dir/$mod ]] || return 1
+        for mod in "${QT_REQUIRED_MODULES[@]}"; do
+            [[ -d $dir/$mod ]] || QT_MISSING+="${QT_MISSING:+ }$mod"
         done
+        [[ -z $QT_MISSING ]] || return 1
         sed -n 's/.*PACKAGE_VERSION "\([0-9.]*\)".*/\1/p' "$cfg" | head -n1
         return 0
     done
@@ -302,18 +310,34 @@ SYSTEM_QT_PKGS=(qt6-base-dev qt6-base-dev-tools qt6-declarative-dev qt6-declarat
 QT_FOUND_PREFIX=""
 
 find_qt() {
-    local prefix ver best="" best_ver=""
+    local prefix ver best="" best_ver="" seen=""
     if [[ -n ${QT_PREFIX:-} ]]; then
-        ver=$(qt_prefix_version "$QT_PREFIX") || fail "В QT_PREFIX=$QT_PREFIX нет нужных модулей Qt (Quick, Multimedia, WebEngineQuick, ShaderTools…)."
+        if ! ver=$(qt_prefix_version "$QT_PREFIX"); then
+            qt_prefix_version "$QT_PREFIX" >/dev/null || true
+            fail "В QT_PREFIX=$QT_PREFIX не хватает модулей Qt: ${QT_MISSING:-нет Qt6ConfigVersion.cmake}."
+        fi
         version_ge "$ver" "$QT_MIN" || fail "В QT_PREFIX=$QT_PREFIX Qt $ver, нужен $QT_MIN или новее."
         QT_FOUND_PREFIX="$QT_PREFIX"
         ok "Qt $ver: $QT_PREFIX (из QT_PREFIX)"
         return 0
     fi
-    # Qt из установщика или aqtinstall: ~/Qt/<версия>/gcc_64
-    for prefix in "$QT_INSTALL_DIR"/*/gcc_64 "$HOME"/Qt/*/gcc_64 /opt/Qt/*/gcc_64 /opt/qt*/gcc_64; do
+    # Qt из установщика или aqtinstall: ~/Qt/<версия>/gcc_64 (или linux_gcc_64)
+    QT_INCOMPLETE=""
+    for prefix in "$QT_INSTALL_DIR"/*/gcc_64 "$QT_INSTALL_DIR"/*/linux_gcc_64 "$HOME"/Qt/*/gcc_64 \
+                  "$HOME"/Qt/*/linux_gcc_64 /opt/Qt/*/gcc_64 /opt/qt*/gcc_64; do
         [[ -d $prefix ]] || continue
-        ver=$(qt_prefix_version "$prefix") || continue
+        prefix=$(readlink -f "$prefix")
+        [[ " $seen " == *" $prefix "* ]] && continue
+        seen+=" $prefix"
+        if ! ver=$(qt_prefix_version "$prefix"); then
+            # Qt есть, но не со всеми модулями — запомним, чтобы доставить их
+            qt_prefix_version "$prefix" >/dev/null || true
+            if [[ -n $QT_MISSING ]]; then
+                warn "в $prefix не хватает модулей: $QT_MISSING"
+                QT_INCOMPLETE="$prefix"
+            fi
+            continue
+        fi
         version_ge "$ver" "$QT_MIN" || continue
         if [[ -z $best_ver ]] || version_ge "$ver" "$best_ver"; then
             best="$prefix"; best_ver="$ver"
@@ -337,6 +361,20 @@ ensure_qt() {
     step "Qt $QT_MIN или новее"
     find_qt && return 0
 
+    # Qt уже стоит, но без части модулей (чаще всего WebEngine) — доставляем их
+    if [[ -n ${QT_INCOMPLETE:-} && $DEPS_ONLY -eq 0 ]]; then
+        local incomplete_ver
+        incomplete_ver=$(basename "$(dirname "$QT_INCOMPLETE")")
+        if ask "Доставить недостающие модули в Qt $incomplete_ver через aqtinstall?"; then
+            QT_VERSION="$incomplete_ver"
+            QT_INSTALL_DIR="$(dirname "$(dirname "$QT_INCOMPLETE")")"
+            install_qt_aqt
+            find_qt && return 0
+            qt_prefix_version "$QT_INCOMPLETE" >/dev/null || true
+            fail "В $QT_INCOMPLETE всё ещё не хватает: $QT_MISSING. Поставьте их установщиком Qt (MaintenanceTool) и запустите ./install.sh снова."
+        fi
+    fi
+
     # В репозиториях дистрибутива уже есть подходящий Qt?
     local candidate
     candidate=$(apt-cache policy qt6-base-dev 2>/dev/null | awk '/Candidate:/ {print $2}')
@@ -359,7 +397,9 @@ ensure_qt() {
         fail "Нужен Qt $QT_MIN+. Укажите готовый: QT_PREFIX=/путь/к/Qt/6.x/gcc_64 ./install.sh"
     fi
     install_qt_aqt
-    find_qt || fail "Qt $QT_VERSION установлен, но не найден в $QT_INSTALL_DIR/$QT_VERSION/gcc_64"
+    find_qt && return 0
+    qt_prefix_version "$QT_INSTALL_DIR/$QT_VERSION/gcc_64" >/dev/null || true
+    fail "Qt $QT_VERSION установлен в $QT_INSTALL_DIR/$QT_VERSION, но в нём не хватает модулей: ${QT_MISSING:-неизвестно}. Подробности — в $LOG"
 }
 
 install_qt_aqt() {
@@ -379,18 +419,27 @@ install_qt_aqt() {
     done
     [[ -n $arch ]] || fail "Нет сборки Qt $QT_VERSION для linux x86_64 (есть: $arches)."
 
-    # Нужные модули — только те, что есть у этой версии (часть уже входит в базовый пакет)
-    local available wanted=(qtwebengine qtwebchannel qtpositioning qtmultimedia qtshadertools) mods=() m
-    available=$("$aqt" list-qt linux desktop --modules "$QT_VERSION" "$arch" 2>>"$LOG") || available=""
-    for m in "${wanted[@]}"; do
-        if [[ " $available " == *" $m "* ]]; then mods+=("$m"); fi
-    done
-    info "загрузка Qt $QT_VERSION ($arch; модули: ${mods[*]:-базовые}) — это займёт время"
     mkdir -p "$QT_INSTALL_DIR"
-    local cmd=("$aqt" install-qt linux desktop "$QT_VERSION" "$arch" -O "$QT_INSTALL_DIR")
-    [[ ${#mods[@]} -gt 0 ]] && cmd+=(-m "${mods[@]}")
-    "${cmd[@]}" >>"$LOG" 2>&1 || fail "aqtinstall не смог установить Qt $QT_VERSION."
-    ok "Qt $QT_VERSION установлен в $QT_INSTALL_DIR/$QT_VERSION"
+    # Базовый Qt (если его ещё нет) — повторная установка поверх просто ничего не меняет
+    if [[ ! -f $QT_INSTALL_DIR/$QT_VERSION/gcc_64/lib/cmake/Qt6/Qt6ConfigVersion.cmake &&
+          ! -f $QT_INSTALL_DIR/$QT_VERSION/linux_gcc_64/lib/cmake/Qt6/Qt6ConfigVersion.cmake ]]; then
+        info "загрузка Qt $QT_VERSION ($arch) — это займёт время"
+        "$aqt" install-qt linux desktop "$QT_VERSION" "$arch" -O "$QT_INSTALL_DIR" >>"$LOG" 2>&1 ||
+            fail "aqtinstall не смог установить Qt $QT_VERSION."
+    fi
+    # Модули — каждый отдельно: WebEngine с Qt 6.8 лежит среди «расширений» и в списке
+    # модулей aqt может не показываться, но ставится так же. Один неудачный модуль
+    # не мешает остальным
+    local m failed=()
+    for m in "${AQT_MODULES[@]}"; do
+        info "модуль $m"
+        "$aqt" install-qt linux desktop "$QT_VERSION" "$arch" -O "$QT_INSTALL_DIR" -m "$m" >>"$LOG" 2>&1 ||
+            failed+=("$m")
+    done
+    if [[ ${#failed[@]} -gt 0 ]]; then
+        warn "aqtinstall не смог поставить: ${failed[*]} (подробности — в журнале)"
+    fi
+    ok "Qt $QT_VERSION: $QT_INSTALL_DIR/$QT_VERSION"
 }
 
 build_shell() {
