@@ -136,6 +136,8 @@ private:
     void setMessage(const QString &message);
     void readAccount();
     void startClient(Mode mode);
+    bool needsBootstrap() const;
+    void finishBootstrap();
     void queueManifest(const QString &appId);
     void stopClient(std::function<void()> then);
     void restartSilent();
@@ -191,5 +193,8 @@ private:
     QList<std::function<void()>> m_afterStop;
     QList<std::function<void(bool)>> m_onOnline;
     bool m_stopping = false;
+    bool m_bootstrapping = false;               // первая загрузка клиента на невидимом экране
+    Mode m_bootstrapMode = Mode::Silent;
+    qint64 m_bootstrapReadySince = -1;
     bool m_wantRunning = false;
 };

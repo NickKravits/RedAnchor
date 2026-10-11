@@ -472,6 +472,25 @@ QString SteamClient::installPath(const QString &appId) const
 
 // ---------- Процесс клиента ----------
 
+bool SteamClient::needsBootstrap() const
+{
+    return !root().isEmpty() && !QFileInfo::exists(root() + QStringLiteral("/ubuntu12_32/steamui.so"));
+}
+
+void SteamClient::finishBootstrap()
+{
+    if (!m_bootstrapping || m_stopping || !m_process)
+        return;
+    qInfo("Steam: first download finished, restarting the client normally");
+    const Mode mode = m_bootstrapMode;
+    stopClient([this, mode] {
+        m_bootstrapping = false;
+        m_phaseProgress = -1;
+        m_message.clear();
+        startClient(mode);
+    });
+}
+
 void SteamClient::runCommand(const QStringList &args)
 {
     QProcess process;
@@ -516,13 +535,29 @@ void SteamClient::startClient(Mode mode)
         args = {QStringLiteral("-silent"), QStringLiteral("-nochatui"), QStringLiteral("-nofriendsui")};
         setPhase(QStringLiteral("starting"));
     }
+    // Клиента в этом HOME ещё нет: первый запуск докачивает его (около 500 МБ) и показывает
+    // своё окно «Updating Steam…». Делаем это на невидимом экране (Xvfb) — прогресс виден
+    // в оболочке, — а когда клиент готов, закрываем его и запускаем как обычно
+    QString program = steamExecutable();
+    const QString xvfb = QStandardPaths::findExecutable(QStringLiteral("xvfb-run"));
+    m_bootstrapping = needsBootstrap() && !xvfb.isEmpty();
+    m_bootstrapMode = mode;
+    m_bootstrapReadySince = -1;
+    if (m_bootstrapping) {
+        args = QStringList{QStringLiteral("-a"), QStringLiteral("-s"), QStringLiteral("-screen 0 1280x800x24"), program,
+                           QStringLiteral("-silent"), QStringLiteral("-nochatui"), QStringLiteral("-nofriendsui")};
+        program = xvfb;
+        m_phaseProgress = 0;
+        m_message = tr("Steam загружается…");
+        emit stateChanged();
+    }
     QDir().mkpath(m_profile + QStringLiteral("/logs"));
     auto log = std::make_shared<QFile>(m_profile + QStringLiteral("/logs/steam.log"));
     if (!log->open(QIODevice::WriteOnly | QIODevice::Truncate))
         log.reset();
 
     m_process = new QProcess(this);
-    m_process->setProgram(steamExecutable());
+    m_process->setProgram(program);
     m_process->setArguments(args);
     m_process->setProcessEnvironment(environment());
     m_process->setWorkingDirectory(m_home);
@@ -547,6 +582,10 @@ void SteamClient::startClient(Mode mode)
                 m_message = percent >= 100 ? QString() : tr("Steam обновляется…");
                 emit stateChanged();
             }
+            // Первая загрузка на невидимом экране закончилась: «Update complete, launching…»
+            if (m_bootstrapping && (line.contains(QLatin1String("Update complete"), Qt::CaseInsensitive)
+                                    || line.contains(QLatin1String("Verification complete"), Qt::CaseInsensitive)))
+                QTimer::singleShot(3000, this, &SteamClient::finishBootstrap);
         }
     });
     connect(process, &QProcess::finished, this, [this, process](int code) {
@@ -557,6 +596,14 @@ void SteamClient::startClient(Mode mode)
         m_process = nullptr;
         if (m_stopping)
             return;   // закрываем сами — stopClient доделает
+        if (m_bootstrapping) {
+            // Клиент закрылся во время первой загрузки: если он уже готов — запускаем как обычно
+            m_bootstrapping = false;
+            if (code == 0 && !needsBootstrap()) {
+                startClient(m_bootstrapMode);
+                return;
+            }
+        }
         // Клиент закрылся сам (вход отменили, Big Picture закрыли, клиент упал)
         m_online = false;
         if (m_phase == QLatin1String("signin") && !m_signInDone) {
@@ -583,7 +630,8 @@ void SteamClient::startClient(Mode mode)
         setPhase(QString());
         setMessage(tr("Не удалось запустить Steam."));
     });
-    qInfo("Steam: starting client (%s), HOME=%s", qPrintable(args.join(QLatin1Char(' '))), qPrintable(m_home));
+    qInfo("Steam: starting client (%s%s), HOME=%s", m_bootstrapping ? "first download on a hidden display: " : "",
+          qPrintable(args.join(QLatin1Char(' '))), qPrintable(m_home));
     m_process->start();
     m_poll->start();
 }
@@ -613,7 +661,8 @@ void SteamClient::stopClient(std::function<void()> then)
     }
     m_stopping = true;
     m_wantRunning = false;
-    setPhase(QStringLiteral("stopping"));
+    if (!m_bootstrapping)
+        setPhase(QStringLiteral("stopping"));
     runCommand({QStringLiteral("-shutdown")});
 
     // Ждём, пока клиент закроется; не закрылся сам — завершаем
@@ -1114,6 +1163,14 @@ void SteamClient::poll()
     // Клиент закрылся без нас (например, из Big Picture) — фаза больше не действует
     if (!isRunning && !m_stopping && !m_phase.isEmpty() && m_phase != QLatin1String("stopping") && !m_process)
         setPhase(QString());
+    // Первая загрузка: строку «Update complete» не увидели, но клиент уже на месте —
+    // ждём минуту (докачивает и распаковывает) и запускаем как обычно
+    if (m_bootstrapping && !needsBootstrap()) {
+        if (m_bootstrapReadySince < 0)
+            m_bootstrapReadySince = m_clock.elapsed();
+        else if (m_clock.elapsed() - m_bootstrapReadySince > 60000)
+            finishBootstrap();
+    }
     // Отложенные изменения библиотеки (ждали конца игры)
     if (!m_offline.isEmpty() && !m_restartTimer->isActive() && !m_stopping)
         restartSilent();

@@ -443,11 +443,12 @@ install_steam() {
         fi
         install_steam_deb
     fi
-    # Правила udev для контроллеров (DualSense, Xbox, Steam Controller) и 32-битные библиотеки
+    # Правила udev для контроллеров (DualSense, Xbox, Steam Controller), 32-битные библиотеки
+    # и Xvfb — на невидимом экране оболочка делает первую загрузку клиента Steam
     PSTART=70 PEND=99
     apt_install_optional steam-devices steam-libs-amd64 steam-libs-i386 \
         libc6:i386 libgl1:i386 libgl1-mesa-dri:i386 libegl1:i386 libvulkan1:i386 \
-        mesa-vulkan-drivers:i386 libudev1:i386 libgbm1:i386 zenity xdg-utils
+        mesa-vulkan-drivers:i386 libudev1:i386 libgbm1:i386 zenity xdg-utils xvfb
     if command -v udevadm >/dev/null 2>&1; then
         udevadm control --reload >&2 || true
         udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc >&2 || true
