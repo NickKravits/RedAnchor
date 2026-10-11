@@ -415,52 +415,82 @@ ensure_qt() {
 # первыми идут европейские зеркала с полной копией репозитория
 read -r -a AQT_MIRRORS <<<"${AQT_MIRRORS:-https://ftp.fau.de/qtproject https://mirror.netcologne.de/qtproject https://mirrors.dotsrc.org/qtproject https://www.nic.funet.fi/pub/mirrors/download.qt-project.org https://download.qt.io https://mirrors.ocf.berkeley.edu/qt}"
 AQT_ERROR=""
+AQT_NO_HASH=0
+
+# aqt_attempt <зеркало> <алгоритм> <сборка> [аргументы…] — одна попытка aqt install-qt.
+# Пока aqt работает, показывает время, объём скачанного и последнюю строку aqt.
+# При неудаче в AQT_ERROR — последняя строка ERROR из вывода aqt
+aqt_attempt() {
+    local base=$1 algo=$2 arch=$3 out pid rc start line mb dest alog="$LOG_DIR/aqt-current.log"
+    shift 3
+    local extra=()
+    [[ $AQT_NO_HASH -eq 1 ]] && extra=(--UNSAFE-ignore-hash)
+    dest=$(realpath -m "$QT_INSTALL_DIR")
+    echo "aqt install-qt $QT_VERSION $arch $* (зеркало $base, $algo${extra[*]:+, без проверки})" >>"$LOG"
+    : >"$alog"
+    # Контрольные суммы aqt по умолчанию берёт только с download.qt.io — если он недоступен,
+    # ни одно зеркало не помогает («Failed to download checksum»). Берём их с того же зеркала
+    printf '[aqt]\nbaseurl : %s\n\n[requests]\nhash_algorithm : %s\n\n[mirrors]\ntrusted_mirrors :\n    %s\n' \
+        "$base" "$algo" "$base" >"$LOG_DIR/aqt-settings.ini"
+    # Запускаем из каталога журналов: aqt кладёт туда свой aqtinstall.log и скачанные архивы
+    (cd "$LOG_DIR" && exec "$AQT_VENV/bin/aqt" -c aqt-settings.ini install-qt linux desktop "$QT_VERSION" "$arch" \
+        -O "$dest" -b "$base" --timeout 30 "${extra[@]}" "$@") >"$alog" 2>&1 &
+    pid=$!
+    start=$SECONDS
+    while kill -0 "$pid" 2>/dev/null; do
+        if [[ $INTERACTIVE_OUT -eq 1 ]]; then
+            line=$(grep -E 'INFO|ERROR|WARN' "$alog" 2>/dev/null | tail -n 1 | tr -d '\r' |
+                   sed -E 's/^(INFO|WARNING|ERROR) *: *//' | cut -c1-60 || true)
+            # aqt пишет о модуле, только когда он скачан и распакован, а большие модули
+            # качаются минутами — показываем, сколько уже скачано и распаковано
+            mb=$(du -scm "$LOG_DIR"/*.7z "$dest/$QT_VERSION" 2>/dev/null | tail -n 1 | cut -f1 || true)
+            printf '\r\e[K      %s%d:%02d%s  %s МБ  %s' "$C_CYAN" $(((SECONDS - start) / 60)) \
+                $(((SECONDS - start) % 60)) "$C_RESET" "${mb:-0}" "${line:-соединение с $base…}"
+        fi
+        sleep 1
+    done
+    rc=0
+    wait "$pid" || rc=$?
+    [[ $INTERACTIVE_OUT -eq 1 ]] && printf '\r\e[K'
+    out=$(cat "$alog")
+    echo "$out" >>"$LOG"
+    [[ $rc -eq 0 ]] && return 0
+    AQT_ERROR=$(grep -E 'ERROR' <<<"$out" | tail -1 | sed -E 's/^ERROR *: *//' || true)
+    [[ -n $AQT_ERROR ]] || AQT_ERROR=$(tail -1 <<<"$out")
+    return 1
+}
 
 # aqt_install <сборка> [аргументы…] — ставит Qt $QT_VERSION, пробуя зеркала по очереди.
-# При неудаче в AQT_ERROR — последняя строка ERROR из вывода aqt
+# На зеркалах может не быть файлов .sha256 (их надёжно хранит только download.qt.io) — тогда
+# проверяем по .sha1, которые лежат рядом с архивами для официального установщика Qt
 aqt_install() {
-    local arch=$1 base out pid rc start line mb dest alog="$LOG_DIR/aqt-current.log"
-    shift
-    dest=$(realpath -m "$QT_INSTALL_DIR")
+    local base algo had_checksum=0
     for base in "${AQT_MIRRORS[@]}"; do
-        echo "aqt install-qt $QT_VERSION $arch $* (зеркало $base)" >>"$LOG"
-        : >"$alog"
-        # Контрольные суммы aqt по умолчанию берёт только с download.qt.io — если он недоступен,
-        # ни одно зеркало не помогает («Failed to download checksum»). Берём их с того же зеркала
-        printf '[aqt]\nbaseurl : %s\n\n[mirrors]\ntrusted_mirrors :\n    %s\n' "$base" "$base" >"$LOG_DIR/aqt-settings.ini"
-        # aqt качает долго и молча — пока он работает, показываем время и его последнюю строку.
-        # Запускаем из каталога журналов: aqt кладёт свой aqtinstall.log в текущий каталог
-        (cd "$LOG_DIR" && exec "$AQT_VENV/bin/aqt" -c aqt-settings.ini install-qt linux desktop "$QT_VERSION" "$arch" \
-            -O "$dest" -b "$base" --timeout 30 "$@") >"$alog" 2>&1 &
-        pid=$!
-        start=$SECONDS
-        while kill -0 "$pid" 2>/dev/null; do
-            if [[ $INTERACTIVE_OUT -eq 1 ]]; then
-                line=$(grep -E 'INFO|ERROR|WARN' "$alog" 2>/dev/null | tail -n 1 | tr -d '\r' |
-                       sed -E 's/^(INFO|WARNING|ERROR) *: *//' | cut -c1-60 || true)
-                # aqt пишет о модуле, только когда он скачан и распакован, а большие модули
-                # качаются минутами — показываем, сколько уже скачано (архивы лежат в текущем
-                # каталоге aqt) и распаковано
-                mb=$(du -scm "$LOG_DIR"/*.7z "$dest/$QT_VERSION" 2>/dev/null | tail -n 1 | cut -f1 || true)
-                printf '\r\e[K      %s%d:%02d%s  %s МБ  %s' "$C_CYAN" $(((SECONDS - start) / 60)) \
-                    $(((SECONDS - start) % 60)) "$C_RESET" "${mb:-0}" "${line:-соединение с $base…}"
+        for algo in sha256 sha1; do
+            aqt_attempt "$base" "$algo" "$@" && return 0
+            # Нет такой версии или модуля — другие зеркала не помогут
+            if grep -qiE 'not (a valid|found|available)|invalid version|no qt version' <<<"$AQT_ERROR"; then
+                return 1
             fi
-            sleep 1
+            if grep -qi 'checksum' <<<"$AQT_ERROR"; then
+                had_checksum=1
+                [[ $algo == sha256 ]] && info "на зеркале $base нет SHA-256 — проверяю по SHA-1"
+                continue
+            fi
+            break
         done
-        rc=0
-        wait "$pid" || rc=$?
-        [[ $INTERACTIVE_OUT -eq 1 ]] && printf '\r\e[K'
-        out=$(cat "$alog")
-        echo "$out" >>"$LOG"
-        [[ $rc -eq 0 ]] && return 0
-        AQT_ERROR=$(grep -E 'ERROR' <<<"$out" | tail -1 | sed -E 's/^ERROR *: *//' || true)
-        [[ -n $AQT_ERROR ]] || AQT_ERROR=$(tail -1 <<<"$out")
-        # Нет такой версии или модуля — другие зеркала не помогут
-        if grep -qiE 'not (a valid|found|available)|invalid version|no qt version|unknown' <<<"$AQT_ERROR"; then
-            return 1
-        fi
-        warn "зеркало $base не ответило: $AQT_ERROR — пробую следующее"
+        warn "зеркало $base не подошло: $AQT_ERROR"
     done
+    # Архивы на зеркалах есть, но контрольные суммы не скачиваются — с согласия
+    # пользователя ставим без проверки (файлы всё равно идут по HTTPS с зеркала Qt)
+    if [[ $had_checksum -eq 1 && $AQT_NO_HASH -eq 0 && $ASSUME_YES -eq 0 && -t 0 ]] &&
+       ask "Контрольные суммы Qt недоступны ни на одном зеркале. Установить Qt без их проверки (файлы всё равно идут по HTTPS)?"; then
+        AQT_NO_HASH=1
+        for base in "${AQT_MIRRORS[@]}"; do
+            aqt_attempt "$base" sha256 "$@" && return 0
+            warn "зеркало $base не подошло: $AQT_ERROR"
+        done
+    fi
     return 1
 }
 
