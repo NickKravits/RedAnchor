@@ -199,6 +199,11 @@ QString SteamClient::wrapperPath() const
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/redanchor/steam-game-wrapper");
 }
 
+QString SteamClient::shimDir() const
+{
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/redanchor/steam-shim");
+}
+
 QString SteamClient::envDir() const
 {
     return m_profile.isEmpty() ? QString() : m_profile + QStringLiteral("/stores/steam/env");
@@ -222,6 +227,9 @@ QProcessEnvironment SteamClient::environment() const
             env.remove(name);
     }
     env.remove(QStringLiteral("SDL_GAMECONTROLLER_IGNORE_DEVICES"));
+    // Заглушка zenity — первой в PATH (см. writeInstallerShim)
+    const QString path = env.value(QStringLiteral("PATH"), QStringLiteral("/usr/local/bin:/usr/bin:/bin:/usr/games"));
+    env.insert(QStringLiteral("PATH"), shimDir() + QLatin1Char(':') + path);
     return env;
 }
 
@@ -419,6 +427,7 @@ void SteamClient::startClient(Mode mode)
     if (running())
         return;
 
+    writeInstallerShim();
     applyConfig();
     m_online = false;
     m_wantRunning = true;
@@ -680,7 +689,11 @@ void SteamClient::writeWrapper()
         "    . \"$REDANCHOR_STEAM_ENV/$id.env\"\n"
         "fi\n"
         "exec \"$@\"\n";
-    const QString path = wrapperPath();
+    writeScript(wrapperPath(), script);
+}
+
+void SteamClient::writeScript(const QString &path, const QByteArray &script)
+{
     QFile current(path);
     if (current.open(QIODevice::ReadOnly) && current.readAll() == script && QFileInfo(path).isExecutable())
         return;
@@ -694,6 +707,33 @@ void SteamClient::writeWrapper()
     QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner
                                     | QFileDevice::ReadGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther
                                     | QFileDevice::ExeOther);
+}
+
+// Пакет steam-installer (Debian, Ubuntu) при первом запуске в новом HOME спрашивает через
+// zenity «Steam installer — Install / Cancel». В gamescope это окно ни геймпадом, ни мышью
+// не нажать, а Steam ставит сам пользователь из оболочки — поэтому первым в PATH клиента
+// лежит заглушка zenity: на этот вопрос она отвечает «Install», остальное передаёт
+// настоящему zenity (или yad)
+void SteamClient::writeInstallerShim()
+{
+    static const QByteArray script =
+        "#!/bin/sh\n"
+        "# RedAnchor: заглушка zenity для клиента Steam (см. SteamClient::writeInstallerShim)\n"
+        "question=; installer=\n"
+        "for arg in \"$@\"; do\n"
+        "    case \"$arg\" in\n"
+        "        --question) question=1 ;;\n"
+        "        \"--title=Steam installer\") installer=1 ;;\n"
+        "    esac\n"
+        "done\n"
+        "[ -n \"$question\" ] && [ -n \"$installer\" ] && exit 0\n"
+        "here=$(dirname \"$0\")\n"
+        "PATH=$(printf '%s' \"$PATH\" | tr ':' '\\n' | grep -vxF \"$here\" | paste -sd: -)\n"
+        "export PATH\n"
+        "if command -v zenity >/dev/null 2>&1; then exec zenity \"$@\"; fi\n"
+        "if command -v yad >/dev/null 2>&1; then exec yad \"$@\"; fi\n"
+        "exit 1\n";
+    writeScript(shimDir() + QStringLiteral("/zenity"), script);
 }
 
 // ---------- Вход ----------

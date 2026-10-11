@@ -123,6 +123,7 @@ private:
     QProcessEnvironment environment() const;
     QString wrapperPath() const;
     QString envDir() const;
+    QString shimDir() const;
     QStringList libraryFolders() const;
     qint64 pidFromFile() const;
     quint32 activeUser() const;
@@ -138,6 +139,8 @@ private:
     void runCommand(const QStringList &args);
     void applyConfig();
     void writeWrapper();
+    void writeInstallerShim();
+    static void writeScript(const QString &path, const QByteArray &script);
     void poll();
     void scanManifests();
     void onSignedIn();
