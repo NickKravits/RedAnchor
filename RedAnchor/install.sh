@@ -155,11 +155,28 @@ run_helper() {
 }
 
 render_progress() {
-    local word pct text bar filled width=30
-    while read -r word pct text; do
+    local word pct text bar filled width=30 rc last_pct=0 last_text="" quiet=0 activity
+    while :; do
+        # Помощник долго молчит (apt ждёт блокировку dpkg, качает или настраивает пакеты) —
+        # показываем последнюю строку журнала, чтобы было видно, что установка идёт
+        if read -r -t 5 word pct text; then
+            quiet=0
+        else
+            rc=$?
+            [[ $rc -le 128 ]] && break   # конец вывода
+            quiet=$((quiet + 5))
+            if [[ $INTERACTIVE_OUT -eq 1 ]]; then
+                activity=$(tail -n 40 "$LOG" 2>/dev/null | grep -v '^  [0-9]*% ' | tail -n 1 | tr -d '\r' | cut -c1-70)
+                printf '\r\e[K      %s%3d%%%s  %s %s(%d с)%s' "$C_CYAN" "$last_pct" "$C_RESET" \
+                    "${activity:-$last_text}" "$C_DIM" "$quiet" "$C_RESET"
+            fi
+            continue
+        fi
         case "$word" in
             PROGRESS)
                 [[ $pct =~ ^[0-9]+$ ]] || continue
+                last_pct=$pct
+                last_text=$text
                 echo "  $pct% $text" >>"$LOG"
                 if [[ $INTERACTIVE_OUT -eq 1 ]]; then
                     filled=$((pct * width / 100))
