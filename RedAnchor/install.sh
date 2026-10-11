@@ -291,7 +291,16 @@ qt_prefix_version() {
             [[ -d $dir/$mod ]] || QT_MISSING+="${QT_MISSING:+ }$mod"
         done
         [[ -z $QT_MISSING ]] || return 1
-        sed -n 's/.*PACKAGE_VERSION "\([0-9.]*\)".*/\1/p' "$cfg" | head -n1
+        # Версия — в Qt6ConfigVersionImpl.cmake (Qt6ConfigVersion.cmake только подключает его);
+        # на крайний случай — из имени каталога (~/Qt/6.10.1/gcc_64)
+        local ver
+        ver=$(sed -n 's/.*PACKAGE_VERSION "\([0-9][0-9.]*\)".*/\1/p' "$dir/Qt6/Qt6ConfigVersionImpl.cmake" "$cfg" 2>/dev/null | head -n1)
+        if [[ -z $ver ]]; then
+            ver=$(basename "$(dirname "$prefix")")
+            [[ $ver =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || ver=""
+        fi
+        [[ -n $ver ]] || { QT_MISSING="(не удалось узнать версию Qt)"; return 1; }
+        echo "$ver"
         return 0
     done
     return 1
