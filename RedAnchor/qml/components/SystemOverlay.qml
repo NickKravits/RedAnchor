@@ -169,7 +169,8 @@ Window {
             anchors.bottomMargin: Theme.px(24)
             // На узких экранах панель не шире окна
             width: Math.min(Theme.px(520), overlay.width - 2 * Theme.px(24))
-            height: panelContent.implicitHeight + Theme.px(48)
+            // Высота — по загруженной панели (у Loader implicitHeight только для чтения)
+            height: (panelContent.item ? panelContent.item.implicitHeight : 0) + Theme.px(48)
             radius: Theme.radius * 1.5
             color: Qt.rgba(0.07, 0.08, 0.1, 0.96)
             border.width: 1
@@ -181,7 +182,6 @@ Window {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.margins: Theme.px(24)
-                implicitHeight: item ? item.implicitHeight : 0
                 sourceComponent: content.panel === "sound" ? soundPanel
                                  : content.panel === "game" ? gamePanel
                                  : content.panel === "steam" ? steamPanel
