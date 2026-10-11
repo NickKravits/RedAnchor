@@ -350,9 +350,28 @@ install_drivers() {
 steam_packages() {
     echo "$1"
     local pkg
-    for pkg in steam-libs-amd64 steam-libs:i386 steam-libs-i386:i386; do
+    for pkg in steam-libs-amd64 steam-libs-i386:i386; do
         pkg_available "$pkg" && echo "$pkg"
     done
+}
+
+# Репозиторий Valve (его добавляет пакет steam-launcher). Его steam-libs-* новее
+# Ubuntu-шных, и steam-installer из Ubuntu, которому нужны строго свои версии, с ним не
+# ставится («Reached two conflicting assignments»). Источники не смешиваем.
+VALVE_LISTS=(/etc/apt/sources.list.d/steam-stable.list /etc/apt/sources.list.d/steam-beta.list)
+
+disable_valve_repo() {
+    local list changed=0
+    for list in "${VALVE_LISTS[@]}"; do
+        [[ -f $list ]] || continue
+        backup_source "$list"
+        rm -f "$list"
+        changed=1
+    done
+    if [[ $changed -eq 1 ]]; then
+        log "репозиторий Valve отключён (копия — в /var/backups/redanchor): ставим Steam из Ubuntu"
+        SOURCES_CHANGED=1
+    fi
 }
 
 # Официальный пакет Steam от Valve (steam-launcher, добавляет репозиторий Valve)
@@ -366,12 +385,14 @@ install_steam_deb() {
     chmod 755 "$tmp"   # apt читает файл от пользователя _apt
     curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
     chmod 644 "$tmp/steam.deb"
-    PSTART=20 PEND=70
-    # shellcheck disable=SC2046
-    apt_install_required $(steam_packages "$tmp/steam.deb")
-    # steam-launcher добавляет репозиторий Valve — оттуда steam-libs
+    PSTART=20 PEND=60
+    apt_install_required "$tmp/steam.deb"
+    # steam-launcher добавляет репозиторий Valve — его 32-битные библиотеки ставим оттуда же
     SOURCES_CHANGED=1
     apt_update
+    PSTART=60 PEND=70
+    # shellcheck disable=SC2046
+    apt_install_required $(steam_packages steam-launcher)
 }
 
 install_steam() {
@@ -393,6 +414,12 @@ install_steam() {
     fi
     apt_update
 
+    # Клиент из Ubuntu ставим без репозитория Valve (если steam-launcher от Valve ещё не стоит)
+    if ! pkg_installed steam-launcher; then
+        disable_valve_repo
+        apt_update
+    fi
+
     # shellcheck disable=SC2046
     if pkg_installed steam-installer || pkg_installed steam-launcher || pkg_installed steam || pkg_installed steam:i386; then
         log "клиент Steam уже установлен"
@@ -403,7 +430,7 @@ install_steam() {
         # убираем остатки и ставим официальный steam_latest.deb от Valve
         if pkg_available steam-installer; then
             log "steam-installer не установился — ставим пакет Steam от Valve"
-            apt-get purge -y "${APT_OPTS[@]}" steam-installer >&2 || true
+            apt-get purge -y "${APT_OPTS[@]}" steam-installer steam-libs:i386 steam-libs-i386:i386 >&2 || true
             repair_dpkg
         fi
         install_steam_deb
