@@ -120,7 +120,11 @@ apt_install() {
     return "${PIPESTATUS[0]}"
 }
 
-# Установка обязательных пакетов: при ошибке чиним зависимости и пробуем ещё раз
+# Установка обязательных пакетов: при ошибке чиним зависимости и пробуем ещё раз —
+# со свежим списком пакетов и классическим решателем зависимостей. Новый решатель apt 3
+# (Ubuntu 25.04+) не умеет сам подтянуть 32-битные пары пакетов, если для этого нужно
+# обновить их 64-битные версии («Unable to satisfy dependencies… is not selected for install»),
+# а классический умеет
 apt_install_required() {
     if apt_install "$@"; then
         return 0
@@ -128,7 +132,15 @@ apt_install_required() {
     log "установка не удалась, исправляем зависимости и повторяем"
     repair_dpkg
     apt-get install -f -y "${APT_OPTS[@]}" >&2 || true
-    apt_install "$@"
+    SOURCES_CHANGED=1 apt_update
+    if apt_install -o APT::Solver=internal "$@"; then
+        return 0
+    fi
+    # Последняя попытка: пары 64/32 бит расходятся по версиям — обновляем установленные
+    # пакеты (тем же классическим решателем) и ставим снова
+    log "повтор после обновления установленных пакетов"
+    apt-get dist-upgrade -y "${APT_OPTS[@]}" -o APT::Solver=internal >&2 || true
+    apt_install -o APT::Solver=internal "$@"
 }
 
 # Необязательные пакеты: только те, что есть в репозиториях и ещё не стоят;
@@ -333,6 +345,16 @@ install_drivers() {
     esac
 }
 
+# Пакет клиента и его 32-битные библиотеки — явно: так решателю apt не нужно догадываться,
+# что steam-libs-i386 ставится для архитектуры i386
+steam_packages() {
+    echo "$1"
+    local pkg
+    for pkg in steam-libs-amd64 steam-libs-i386:i386; do
+        pkg_available "$pkg" && echo "$pkg"
+    done
+}
+
 # Официальный пакет Steam от Valve (steam-launcher, добавляет репозиторий Valve)
 install_steam_deb() {
     progress 10 "Загрузка клиента Steam с repo.steampowered.com"
@@ -345,7 +367,8 @@ install_steam_deb() {
     curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
     chmod 644 "$tmp/steam.deb"
     PSTART=20 PEND=70
-    apt_install_required "$tmp/steam.deb"
+    # shellcheck disable=SC2046
+    apt_install_required $(steam_packages "$tmp/steam.deb")
     # steam-launcher добавляет репозиторий Valve — оттуда steam-libs
     SOURCES_CHANGED=1
     apt_update
@@ -367,9 +390,10 @@ install_steam() {
     fi
     apt_update
 
+    # shellcheck disable=SC2046
     if pkg_installed steam-installer || pkg_installed steam-launcher || pkg_installed steam || pkg_installed steam:i386; then
         log "клиент Steam уже установлен"
-    elif pkg_available steam-installer && { PSTART=10 PEND=70; apt_install_required steam-installer; }; then
+    elif pkg_available steam-installer && { PSTART=10 PEND=70; apt_install_required $(steam_packages steam-installer); }; then
         log "клиент Steam установлен из репозитория дистрибутива"
     else
         # Пакета нет в репозиториях или он не встал (зависимости, прерванная установка) —
