@@ -3,7 +3,7 @@
 # Запускается от root через pkexec (правило polkit: data/org.redanchor.shell.policy.in)
 # и из install.sh (sudo bash data/redanchor-components <цель>).
 #
-#   redanchor-components system    — всё для сессии: gamescope (и cage как запасной вариант),
+#   redanchor-components system    — всё для сессии: gamescope (Weston и cage как запасные),
 #                                    Xwayland, libxcb-cursor0 (Qt внутри gamescope), Python 3
 #                                    (на нём написан Proton), PipeWire/WirePlumber (громкость),
 #                                    шрифт Inter, BlueZ, NetworkManager
@@ -275,7 +275,7 @@ install_system() {
     # Без этого оболочка не запустится или не запустит игры
     apt_install_required python3 libxcb-cursor0
     PSTART=60 PEND=99
-    local optional=(gamescope cage xwayland fonts-inter
+    local optional=(gamescope weston cage xwayland fonts-inter
                     bluez network-manager polkitd pkexec policykit-1
                     curl ca-certificates tar xz-utils unzip mesa-utils)
     # Звук: PipeWire ставим, если нет ни wpctl, ни pactl (PulseAudio не трогаем)
@@ -284,7 +284,7 @@ install_system() {
     fi
     apt_install_optional "${optional[@]}"
     if ! command -v gamescope >/dev/null 2>&1 && [[ ! -x /usr/games/gamescope ]]; then
-        log "gamescope недоступен в репозиториях этой системы — сессия запустится в cage"
+        log "gamescope недоступен в репозиториях этой системы — сессия запустится в Weston (или cage)"
     fi
 }
 

@@ -592,7 +592,9 @@ void ComponentsManager::applyPackageState(const QHash<QString, QString> &install
     {
         QStringList missing, missingRecommended;
         const bool gamescope = !findProgram(QStringLiteral("gamescope"), kSystemDirs).isEmpty();
-        const bool cage = !findProgram(QStringLiteral("cage"), kSystemDirs).isEmpty();
+        // Запасные композиторы: Weston (kiosk-shell) и cage
+        const bool cage = !findProgram(QStringLiteral("cage"), kSystemDirs).isEmpty()
+                          || !findProgram(QStringLiteral("weston"), kSystemDirs).isEmpty();
         // Proton — скрипт на Python 3
         if (findProgram(QStringLiteral("python3"), kSystemDirs).isEmpty())
             missing << QStringLiteral("Python 3");
