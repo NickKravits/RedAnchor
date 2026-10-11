@@ -37,6 +37,7 @@ SOURCES_CHANGED=0
 progress() { echo "PROGRESS $1 $2"; }
 # Команда упала и прервала установку — пишем, какая именно (оболочка покажет это сообщение)
 set -E
+# shellcheck disable=SC2154
 trap 'rc=$?; echo "ERROR Команда «${BASH_COMMAND}» завершилась с кодом ${rc}" >&2' ERR
 log() { echo "redanchor-components: $*" >&2; }
 
@@ -332,6 +333,24 @@ install_drivers() {
     esac
 }
 
+# Официальный пакет Steam от Valve (steam-launcher, добавляет репозиторий Valve)
+install_steam_deb() {
+    progress 10 "Загрузка клиента Steam с repo.steampowered.com"
+    command -v curl >/dev/null 2>&1 || apt_install_required curl ca-certificates
+    local tmp
+    tmp=$(mktemp -d /tmp/redanchor-steam.XXXXXX)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp'" EXIT
+    chmod 755 "$tmp"   # apt читает файл от пользователя _apt
+    curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
+    chmod 644 "$tmp/steam.deb"
+    PSTART=20 PEND=70
+    apt_install_required "$tmp/steam.deb"
+    # steam-launcher добавляет репозиторий Valve — оттуда steam-libs
+    SOURCES_CHANGED=1
+    apt_update
+}
+
 install_steam() {
     prepare
     # Лицензия Steam: без ответа debconf установка в неинтерактивном режиме обрывается
@@ -350,25 +369,17 @@ install_steam() {
 
     if pkg_installed steam-installer || pkg_installed steam-launcher || pkg_installed steam || pkg_installed steam:i386; then
         log "клиент Steam уже установлен"
-    elif pkg_available steam-installer; then
-        PSTART=10 PEND=70
-        apt_install_required steam-installer
+    elif pkg_available steam-installer && { PSTART=10 PEND=70; apt_install_required steam-installer; }; then
+        log "клиент Steam установлен из репозитория дистрибутива"
     else
-        # Пакета нет в репозиториях — официальный steam_latest.deb от Valve
-        progress 10 "Загрузка клиента Steam с repo.steampowered.com"
-        command -v curl >/dev/null 2>&1 || apt_install_required curl ca-certificates
-        local tmp
-        tmp=$(mktemp -d /tmp/redanchor-steam.XXXXXX)
-        # shellcheck disable=SC2064
-        trap "rm -rf '$tmp'" EXIT
-        chmod 755 "$tmp"   # apt читает файл от пользователя _apt
-        curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
-        chmod 644 "$tmp/steam.deb"
-        PSTART=20 PEND=70
-        apt_install_required "$tmp/steam.deb"
-        # steam-launcher добавляет репозиторий Valve — оттуда steam-libs
-        SOURCES_CHANGED=1
-        apt_update
+        # Пакета нет в репозиториях или он не встал (зависимости, прерванная установка) —
+        # убираем остатки и ставим официальный steam_latest.deb от Valve
+        if pkg_available steam-installer; then
+            log "steam-installer не установился — ставим пакет Steam от Valve"
+            apt-get purge -y "${APT_OPTS[@]}" steam-installer >&2 || true
+            repair_dpkg
+        fi
+        install_steam_deb
     fi
     # Правила udev для контроллеров (DualSense, Xbox, Steam Controller) и 32-битные библиотеки
     PSTART=70 PEND=99

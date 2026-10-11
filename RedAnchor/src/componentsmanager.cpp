@@ -854,7 +854,8 @@ void ComponentsManager::runHelper(const QString &key)
     if (log->open(QIODevice::Append))
         log->write("\n==== " + QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8() + " " + key.toUtf8() + " ====\n");
     auto lastError = std::make_shared<QString>();
-    const auto takeErrors = [this, log, lastError] {
+    auto aptError = std::make_shared<QString>();   // ошибки apt/dpkg важнее остальных
+    const auto takeErrors = [this, log, lastError, aptError] {
         const QByteArray text = m_process->readAllStandardError();
         if (text.isEmpty())
             return;
@@ -868,14 +869,18 @@ void ComponentsManager::runHelper(const QString &key)
                 continue;
             qInfo("redanchor-components: %s", qPrintable(line));
             // «E: …» — ошибка apt, «redanchor-components: …» — сообщение помощника
-            if (line.startsWith(QLatin1String("E: ")) || line.startsWith(QLatin1String("ERROR ")))
-                *lastError = line.section(QLatin1Char(' '), 1);
+            if (line.startsWith(QLatin1String("E: ")))
+                *aptError = line.mid(3);
+            else if (line.startsWith(QLatin1String("dpkg: error")) || line.startsWith(QLatin1String("dpkg: ошибка")))
+                *aptError = line;
+            else if (line.startsWith(QLatin1String("ERROR ")))
+                *lastError = line.mid(6);
             else if (line.startsWith(QLatin1String("redanchor-components: ")) && line.contains(QLatin1String("не ")))
                 *lastError = line.mid(22);
         }
     };
     connect(m_process, &QProcess::readyReadStandardError, this, takeErrors);
-    connect(m_process, &QProcess::finished, this, [this, parseOutput, takeErrors, lastError](int code, QProcess::ExitStatus status) {
+    connect(m_process, &QProcess::finished, this, [this, parseOutput, takeErrors, lastError, aptError](int code, QProcess::ExitStatus status) {
         parseOutput();   // последние строки (REBOOT) могли прийти вместе с завершением
         takeErrors();
         m_process->deleteLater();
@@ -885,6 +890,7 @@ void ComponentsManager::runHelper(const QString &key)
         QString message;
         if (!ok) {
             message = code == 126 || code == 127 ? tr("Нет прав на установку (pkexec).")
+                    : !aptError->isEmpty() ? *aptError
                     : !lastError->isEmpty() ? *lastError
                     : tr("Ошибка установки (код %1).").arg(code);
             message += tr(" Подробности: ~/.local/state/redanchor/components.log");
