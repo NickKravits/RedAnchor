@@ -380,7 +380,7 @@ ensure_qt() {
             install_qt_aqt
             find_qt && return 0
             qt_prefix_version "$QT_INCOMPLETE" >/dev/null || true
-            fail "В $QT_INCOMPLETE всё ещё не хватает: $QT_MISSING. Поставьте их установщиком Qt (MaintenanceTool) и запустите ./install.sh снова."
+            fail "В $QT_INCOMPLETE всё ещё не хватает: $QT_MISSING. Подробности — в $LOG (пришлите последние строки)."
         fi
     fi
 
@@ -502,6 +502,130 @@ aqt_install() {
     return 1
 }
 
+# qt_extension_direct <расширение> — ставит расширение Qt (qtwebengine) напрямую из репозитория
+# Qt, без aqt: aqt 3.3 для Qt 6.10 расширение не находит, если у его списка пакетов на зеркале
+# нет контрольной суммы. Список пакетов (Updates.xml) берём с зеркал по очереди, архивы
+# проверяем по .sha256/.sha1 рядом с ними; если сумм нет нигде — только с согласия пользователя
+qt_extension_direct() {
+    local ext=$1 rc=0 allow=$AQT_NO_HASH
+    while :; do
+        rc=0
+        "$AQT_VENV/bin/python3" -I - "$ext" "$QT_VERSION" "$(realpath -m "$QT_INSTALL_DIR")" "$allow" \
+            "$LOG_DIR" "${AQT_MIRRORS[@]}" 2>>"$LOG" <<'PY' || rc=$?
+import hashlib, os, sys, xml.etree.ElementTree as ET
+import requests, py7zr
+
+ext, version, dest, allow, workdir, mirrors = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1", sys.argv[5], sys.argv[6:]
+vstr = version.replace(".", "")
+session = requests.Session()
+
+def say(*a):
+    print(*a, flush=True)
+
+def get(url, stream=False):
+    r = session.get(url, timeout=(15, 60), stream=stream)
+    r.raise_for_status()
+    return r
+
+def checksum(url):
+    for algo in ("sha256", "sha1"):
+        try:
+            text = get(f"{url}.{algo}").text.split()
+            if text and len(text[0]) == {"sha256": 64, "sha1": 40}[algo]:
+                return algo, text[0].lower()
+        except Exception:
+            pass
+    return None, None
+
+tried = []
+nohash = False
+for mirror in mirrors:
+    for archdir in ("x86_64", "linux_gcc_64", "gcc_64"):
+        folder = f"{mirror.rstrip('/')}/online/qtsdkrepository/linux_x64/extensions/{ext}/{vstr}/{archdir}"
+        try:
+            xml = get(f"{folder}/Updates.xml").text
+        except Exception as e:
+            tried.append(f"{folder}: {e}")
+            continue
+        root = ET.fromstring(xml)
+        pkgs = []
+        for pu in root.iter("PackageUpdate"):
+            name = (pu.findtext("Name") or "").strip()
+            if ext not in name or "gcc_64" not in name or "debug" in name:
+                continue
+            ver = (pu.findtext("Version") or "").strip()
+            archives, paths = [], []
+            ops = pu.findall("Operations/Operation[@name='Extract']/Argument")
+            if ops:
+                for i in range(0, len(ops) - 1, 2):
+                    paths.append(ops[i].text.replace("@TargetDir@/", "", 1).replace("@TargetDir@", ""))
+                    archives.append(ops[i + 1].text.strip())
+            else:
+                archives = [a.strip() for a in (pu.findtext("DownloadableArchives") or "").split(",") if a.strip()]
+                paths = [""] * len(archives)
+            pkgs.append((name, ver, archives, paths))
+        if not pkgs:
+            names = [(pu.findtext("Name") or "") for pu in root.iter("PackageUpdate")]
+            tried.append(f"{folder}: нет пакета для gcc_64 (есть: {', '.join(names)})")
+            continue
+        try:
+            for name, ver, archives, paths in pkgs:
+                for archive, path in zip(archives, paths):
+                    url = f"{folder}/{name}/{ver}{archive}"
+                    algo, expected = checksum(url)
+                    if algo is None and not allow:
+                        raise LookupError(f"нет контрольной суммы для {archive}")
+                    say(f"      загрузка {archive}")
+                    local = os.path.join(workdir, archive)
+                    h = hashlib.new(algo) if algo else None
+                    with get(url, stream=True) as r, open(local, "wb") as f:
+                        done = 0
+                        for chunk in r.iter_content(1 << 20):
+                            f.write(chunk)
+                            done += len(chunk)
+                            if sys.stdout.isatty():
+                                print(f"\r\033[K      {archive[:40]}: {done >> 20} МБ", end="", flush=True)
+                            if h:
+                                h.update(chunk)
+                    if sys.stdout.isatty():
+                        print("\r\033[K", end="", flush=True)
+                    if h and h.hexdigest() != expected:
+                        os.unlink(local)
+                        raise RuntimeError(f"контрольная сумма {archive} не совпала ({algo})")
+                    target = os.path.join(dest, path) if path else dest
+                    with py7zr.SevenZipFile(local, "r") as z:
+                        z.extractall(path=target)
+                    os.unlink(local)
+            say(f"      {ext} установлен с {mirror}")
+            sys.exit(0)
+        except SystemExit:
+            raise
+        except LookupError as e:
+            nohash = True
+            tried.append(f"{folder}: {e}")
+            break
+        except Exception as e:
+            tried.append(f"{folder}: {e}")
+            break
+for t in tried:
+    print(t, file=sys.stderr)
+if nohash:
+    say(f"      у архивов {ext} на зеркалах нет контрольных сумм")
+    sys.exit(3)
+say(f"      {ext} {version} не найден ни на одном зеркале — подробности в журнале")
+sys.exit(1)
+PY
+        [[ $rc -eq 3 && $allow -eq 0 ]] || break
+        if [[ $ASSUME_YES -eq 0 && -t 0 ]] &&
+           ask "У архивов $ext на зеркалах нет контрольных сумм. Установить без проверки (файлы всё равно идут по HTTPS)?"; then
+            allow=1
+            continue
+        fi
+        break
+    done
+    return "$rc"
+}
+
 install_qt_aqt() {
     info "подготовка aqtinstall ($AQT_VENV)"
     if [[ ! -x $AQT_VENV/bin/python3 ]]; then
@@ -533,7 +657,13 @@ install_qt_aqt() {
     local m failed=()
     for m in "${AQT_MODULES[@]}"; do
         info "модуль $m"
-        aqt_install "$arch" -m "$m" || failed+=("$m ($AQT_ERROR)")
+        aqt_install "$arch" -m "$m" && continue
+        # WebEngine — расширение: если aqt его не нашёл, качаем напрямую
+        if [[ $m == qtwebengine ]]; then
+            info "aqt не нашёл $m — загружаю напрямую из репозитория Qt"
+            qt_extension_direct "$m" && continue
+        fi
+        failed+=("$m ($AQT_ERROR)")
     done
     if [[ ${#failed[@]} -gt 0 ]]; then
         warn "aqtinstall не смог поставить: ${failed[*]}"
