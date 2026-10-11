@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QList>
@@ -138,6 +139,7 @@ private:
     void startClient(Mode mode);
     bool needsBootstrap() const;
     void finishBootstrap();
+    void readBootstrapLog();
     void queueManifest(const QString &appId);
     void stopClient(std::function<void()> then);
     void restartSilent();
@@ -196,5 +198,7 @@ private:
     bool m_bootstrapping = false;               // первая загрузка клиента на невидимом экране
     Mode m_bootstrapMode = Mode::Silent;
     qint64 m_bootstrapReadySince = -1;
+    QDateTime m_clientStartedAt;                // для чтения журнала загрузчика Steam
+    bool m_bootstrapLogDone = false;
     bool m_wantRunning = false;
 };

@@ -472,6 +472,63 @@ QString SteamClient::installPath(const QString &appId) const
 
 // ---------- Процесс клиента ----------
 
+// Ход обновления клиента. В свой вывод загрузчик Steam его больше не пишет (вывод уходит
+// в журнал Steam), зато пишет в logs/bootstrap_log.txt:
+//   [2026-10-11 15:25:43] Downloading update (58,477 of 496,367 KB)...
+//   [2026-10-11 15:26:01] Update complete, launching...
+// Читаем строки после запуска клиента
+void SteamClient::readBootstrapLog()
+{
+    QFile file(root() + QStringLiteral("/logs/bootstrap_log.txt"));
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+    if (file.size() > 32 * 1024)
+        file.seek(file.size() - 32 * 1024);
+    static const QRegularExpression stamp(QStringLiteral("^\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\] (.*)$"));
+    static const QRegularExpression download(QStringLiteral("Downloading update \\(([\\d,]+) of ([\\d,]+) KB\\)"));
+    double progress = m_phaseProgress;
+    QString message = m_message;
+    bool complete = false;
+    for (const QByteArray &raw : file.readAll().split('\n')) {
+        const QRegularExpressionMatch m = stamp.match(QString::fromUtf8(raw).trimmed());
+        if (!m.hasMatch())
+            continue;
+        const QDateTime when = QDateTime::fromString(m.captured(1), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        if (!when.isValid() || when < m_clientStartedAt)
+            continue;
+        const QString text = m.captured(2);
+        if (const QRegularExpressionMatch d = download.match(text); d.hasMatch()) {
+            const double done = QString(d.captured(1)).remove(QLatin1Char(',')).toDouble();
+            const double total = QString(d.captured(2)).remove(QLatin1Char(',')).toDouble();
+            if (total > 0) {
+                progress = qBound(0.0, done / total, 0.99);
+                message = tr("Steam обновляется…");
+            }
+            complete = false;
+        } else if (text.startsWith(QLatin1String("Download Complete")) || text.startsWith(QLatin1String("Extracting package"))
+                   || text.startsWith(QLatin1String("Installing update"))) {
+            progress = 0.99;
+            message = tr("Steam устанавливает обновление…");
+            complete = false;
+        } else if (text.startsWith(QLatin1String("Update complete")) || text.startsWith(QLatin1String("Verification complete"))
+                   || text.startsWith(QLatin1String("Nothing to do"))) {
+            progress = -1;
+            message.clear();
+            complete = true;
+        }
+    }
+    if (progress != m_phaseProgress || message != m_message) {
+        m_phaseProgress = progress;
+        m_message = message;
+        emit stateChanged();
+    }
+    // Первая загрузка на невидимом экране закончилась
+    if (complete && m_bootstrapping && !m_bootstrapLogDone && !needsBootstrap()) {
+        m_bootstrapLogDone = true;
+        QTimer::singleShot(3000, this, &SteamClient::finishBootstrap);
+    }
+}
+
 bool SteamClient::needsBootstrap() const
 {
     return !root().isEmpty() && !QFileInfo::exists(root() + QStringLiteral("/ubuntu12_32/steamui.so"));
@@ -541,6 +598,8 @@ void SteamClient::startClient(Mode mode)
     QString program = steamExecutable();
     const QString xvfb = QStandardPaths::findExecutable(QStringLiteral("xvfb-run"));
     m_bootstrapping = needsBootstrap() && !xvfb.isEmpty();
+    m_clientStartedAt = QDateTime::currentDateTime().addSecs(-2);
+    m_bootstrapLogDone = false;
     m_bootstrapMode = mode;
     m_bootstrapReadySince = -1;
     if (m_bootstrapping) {
@@ -1163,6 +1222,8 @@ void SteamClient::poll()
     // Клиент закрылся без нас (например, из Big Picture) — фаза больше не действует
     if (!isRunning && !m_stopping && !m_phase.isEmpty() && m_phase != QLatin1String("stopping") && !m_process)
         setPhase(QString());
+    if (m_process && (m_bootstrapping || !m_phase.isEmpty()))
+        readBootstrapLog();
     // Первая загрузка: строку «Update complete» не увидели, но клиент уже на месте —
     // ждём минуту (докачивает и распаковывает) и запускаем как обычно
     if (m_bootstrapping && !needsBootstrap()) {
