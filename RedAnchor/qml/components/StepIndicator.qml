@@ -1,14 +1,15 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 
-// Прогресс первичной настройки: тонкие сегменты с подписями капсом.
+// Прогресс первичной настройки: скруглённые сегменты с номером и подписью капсом.
+// Пройденные шаги — приглушённые, текущий — белый с мягким свечением.
 Row {
     id: root
 
     property var steps: []
     property int current: 0
 
-    spacing: Theme.px(10)
+    spacing: Theme.px(12)
 
     Repeater {
         model: root.steps
@@ -19,28 +20,51 @@ Row {
             readonly property bool done: index < root.current
             readonly property bool active: index === root.current
 
-            spacing: Theme.px(10)
-            width: Theme.px(128)
+            spacing: Theme.px(12)
+            // Сегмент не уже подписи: длинные названия шагов не наезжают на соседние
+            width: Math.max(Theme.px(136), label.implicitWidth + Theme.px(10))
 
             Rectangle {
                 width: parent.width
-                height: Theme.px(2)
-                color: Qt.rgba(1, 1, 1, 0.10)
+                height: Theme.px(4)
+                radius: height / 2
+                color: Qt.rgba(1, 1, 1, 0.12)
 
+                // Свечение текущего сегмента
+                Rectangle {
+                    visible: stepItem.active
+                    anchors.fill: parent
+                    anchors.margins: -Theme.px(3)
+                    radius: height / 2
+                    color: Theme.focusGlow
+                }
                 Rectangle {
                     height: parent.height
+                    radius: height / 2
                     width: stepItem.done || stepItem.active ? parent.width : 0
                     color: stepItem.active ? Theme.textPrimary : Theme.textSecondary
+                    opacity: stepItem.active ? 1 : 0.7
                     Behavior on width { NumberAnimation { duration: Theme.animSlow; easing.type: Easing.OutCubic } }
                 }
             }
-            Text {
-                text: stepItem.modelData.toUpperCase()
-                color: stepItem.active ? Theme.textPrimary : Theme.textMuted
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontCaption
-                font.weight: Font.Medium
-                font.letterSpacing: Theme.px(1.5)
+            Row {
+                id: label
+                spacing: Theme.px(8)
+                Text {
+                    text: (stepItem.index < 9 ? "0" : "") + (stepItem.index + 1)
+                    color: stepItem.active ? Theme.textPrimary : Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    text: stepItem.modelData.toUpperCase()
+                    color: stepItem.active ? Theme.textPrimary : stepItem.done ? Theme.textSecondary : Theme.textMuted
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: Theme.trackingCaps
+                }
             }
         }
     }

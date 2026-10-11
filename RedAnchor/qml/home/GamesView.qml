@@ -96,7 +96,7 @@ FocusScope {
         anchors.leftMargin: -Theme.px(8)
         height: cardSize * 1.2 + Theme.px(20)
         orientation: ListView.Horizontal
-        spacing: Theme.px(22)
+        spacing: Theme.px(26)
         clip: false
         keyNavigationEnabled: true
         // Выбранная карточка держится правее левого края — предыдущая видна наполовину.
@@ -176,11 +176,12 @@ FocusScope {
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontHuge
-            font.weight: Font.Medium
+            font.weight: Font.DemiBold
+            font.letterSpacing: Theme.trackingTight * 2
         }
 
         Row {
-            spacing: Theme.px(64)
+            spacing: Theme.px(40)
 
             Repeater {
                 model: root.current ? [
@@ -194,22 +195,38 @@ FocusScope {
                                                          ? new Date(root.current.installedAt * 1000).toLocaleDateString(Qt.locale(), "d MMMM yyyy")
                                                          : "—" }
                 ] : []
-                delegate: Column {
+                delegate: Row {
                     id: stat
                     required property var modelData
-                    spacing: Theme.px(6)
-                    Text {
-                        text: stat.modelData.label
-                        color: Theme.textSecondary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSmall
+                    required property int index
+                    spacing: Theme.px(40)
+
+                    // Тонкий разделитель между сведениями
+                    Rectangle {
+                        visible: stat.index > 0
+                        width: 1
+                        height: statColumn.height - Theme.px(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.outlineStrong
                     }
-                    Text {
-                        text: stat.modelData.value
-                        color: Theme.textPrimary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontLarge
-                        font.weight: Font.Light
+                    Column {
+                        id: statColumn
+                        spacing: Theme.px(8)
+                        Text {
+                            text: stat.modelData.label.toUpperCase()
+                            color: Theme.textSecondary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontCaption
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: Theme.trackingCaps
+                        }
+                        Text {
+                            text: stat.modelData.value
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontLarge
+                            font.weight: Font.Normal
+                        }
                     }
                 }
             }

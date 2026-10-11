@@ -159,8 +159,9 @@ Window {
         }
 
         // ---------- Панель выбранного значка ----------
-        Rectangle {
+        GlassPanel {
             id: panelBox
+            strong: true
             transform: Translate { y: content.slide }
             visible: opacity > 0
             opacity: content.panel !== "" ? 1 : 0
@@ -172,10 +173,8 @@ Window {
             width: Math.min(Theme.px(520), overlay.width - 2 * Theme.px(24))
             // Высота — по загруженной панели (у Loader implicitHeight только для чтения)
             height: (panelContent.item ? panelContent.item.implicitHeight : 0) + Theme.px(48)
-            radius: Theme.radius * 1.5
-            color: Qt.rgba(0.07, 0.08, 0.1, 0.96)
-            border.width: 1
-            border.color: Theme.outline
+            radius: Theme.radiusLarge
+            color: Qt.rgba(0.07, 0.077, 0.09, 0.94)
 
             Loader {
                 id: panelContent
@@ -201,7 +200,7 @@ Window {
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
-            font.weight: Font.Medium
+            font.weight: Font.DemiBold
             opacity: content.panel === "" ? 1 : 0.6
         }
 
@@ -238,13 +237,18 @@ Window {
 
                         Rectangle {
                             anchors.fill: parent
-                            radius: Theme.radius * 1.5
-                            color: tile.selected ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(1, 1, 1, 0.07)
-                            border.width: tile.focused ? Theme.px(3) : 1
-                            border.color: tile.focused ? Theme.focus : Theme.outline
+                            radius: Theme.radiusTile
+                            color: tile.selected ? Qt.rgba(0.2, 0.21, 0.235, 0.92) : Qt.rgba(0.09, 0.098, 0.115, 0.86)
+                            border.width: 1
+                            border.color: tile.selected ? Qt.rgba(1, 1, 1, 0.22) : Theme.glassBorder
                             scale: tile.selected ? 1.12 : 1
-                            Behavior on scale { NumberAnimation { duration: Theme.animFast; easing.type: Easing.OutCubic } }
+                            Behavior on scale { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutQuint } }
                             Behavior on color { ColorAnimation { duration: Theme.animFast } }
+
+                            FocusRing {
+                                shown: tile.focused
+                                radius: Theme.radiusTile
+                            }
 
                             // Игра: логотип, если его нет — обложка, если и её нет — значок
                             Image {
@@ -427,8 +431,8 @@ Window {
                     required property int index
                     readonly property bool focused: list.current === index && list.activeFocus
                     width: actionColumn.width
-                    height: Theme.px(64)
-                    radius: Theme.radius
+                    height: Theme.controlHeight
+                    radius: height / 2
                     color: focused ? Theme.focus : "transparent"
                     Behavior on color { ColorAnimation { duration: Theme.animFast } }
 

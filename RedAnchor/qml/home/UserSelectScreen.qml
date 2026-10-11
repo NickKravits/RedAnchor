@@ -28,13 +28,27 @@ SetupPage {
 
             NumberAnimation on opacity { from: 0; to: 1; duration: 900; easing.type: Easing.OutCubic }
 
-            Text {
+            Column {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: AccountManager.count > 1 ? qsTr("Кто будет играть?") : qsTr("С возвращением")
-                color: Theme.textPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontTitle
-                font.weight: Font.Light
+                spacing: Theme.px(14)
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: qsTr("RedAnchor").toUpperCase()
+                    color: Theme.textSecondary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontCaption
+                    font.weight: Font.DemiBold
+                    font.letterSpacing: Theme.trackingCaps * 2.5
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: AccountManager.count > 1 ? qsTr("Кто будет играть?") : qsTr("С возвращением")
+                    color: Theme.textPrimary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontTitle
+                    font.weight: Font.Light
+                    font.letterSpacing: Theme.trackingTight
+                }
             }
 
             ListView {
@@ -42,7 +56,7 @@ SetupPage {
                 readonly property real cardWidth: Theme.px(240)
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Math.min(count * cardWidth + Math.max(0, count - 1) * spacing, page.width - 2 * Theme.gutter)
-                height: Theme.px(330)
+                height: Theme.px(360)
                 orientation: ListView.Horizontal
                 spacing: Theme.px(56)
                 clip: true
@@ -77,17 +91,17 @@ SetupPage {
                     Column {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.top: parent.top
-                        anchors.topMargin: Theme.px(16)
-                        spacing: Theme.px(26)
+                        anchors.topMargin: Theme.px(34)
+                        spacing: Theme.px(28)
 
                         Avatar {
                             anchors.horizontalCenter: parent.horizontalCenter
                             name: card.modelData.nickname
                             size: Theme.px(180)
                             highlighted: card.active
-                            scale: card.active ? 1.06 : 0.92
-                            opacity: card.active ? 1 : 0.6
-                            Behavior on scale { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutCubic } }
+                            scale: card.active ? 1.06 : 0.88
+                            opacity: card.active ? 1 : 0.62
+                            Behavior on scale { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutQuint } }
                             Behavior on opacity { NumberAnimation { duration: Theme.animNormal } }
                         }
                         Text {
@@ -99,12 +113,13 @@ SetupPage {
                             color: card.active ? Theme.textPrimary : Theme.textSecondary
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontLarge
-                            font.weight: card.active ? Font.Medium : Font.Normal
+                            font.weight: card.active ? Font.DemiBold : Font.Medium
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: card.modelData.local ? qsTr("Локальная учётная запись") : qsTr("Аккаунт RedAnchor")
-                            color: Theme.textMuted
+                            color: Theme.textSecondary
+                            opacity: card.active ? 1 : 0.7
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSmall
                         }

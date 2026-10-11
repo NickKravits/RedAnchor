@@ -8,7 +8,7 @@ Item {
 
     Column {
         width: Math.min(parent.width, Theme.px(1100))
-        spacing: Theme.px(22)
+        spacing: Theme.px(18)
 
         InfoRow { width: parent.width; label: qsTr("Система"); value: SystemInfo.osName }
         InfoRow { width: parent.width; label: qsTr("Оболочка"); value: qsTr("RedAnchor Shell %1").arg(SystemInfo.shellVersion) }

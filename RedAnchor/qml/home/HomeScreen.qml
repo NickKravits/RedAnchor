@@ -94,13 +94,24 @@ SetupPage {
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: Theme.animSlow } }
         }
-        // Затемнение: текст и карточки должны читаться
+        // Затемнение: текст и карточки должны читаться. Слева и снизу темнее
+        // (там сведения об игре), справа сверху картинка видна лучше.
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(0.01, 0.02, 0.05, 0.55) }
-                GradientStop { position: 0.6; color: Qt.rgba(0.01, 0.02, 0.05, 0.7) }
-                GradientStop { position: 1.0; color: Qt.rgba(0.01, 0.02, 0.05, 0.92) }
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: Qt.rgba(0.03, 0.035, 0.045, 0.72) }
+                GradientStop { position: 0.55; color: Qt.rgba(0.03, 0.035, 0.045, 0.38) }
+                GradientStop { position: 1.0; color: Qt.rgba(0.03, 0.035, 0.045, 0.22) }
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(0.03, 0.035, 0.045, 0.55) }
+                GradientStop { position: 0.3; color: Qt.rgba(0.03, 0.035, 0.045, 0.10) }
+                GradientStop { position: 0.62; color: Qt.rgba(0.03, 0.035, 0.045, 0.35) }
+                GradientStop { position: 1.0; color: Qt.rgba(0.03, 0.035, 0.045, 0.94) }
             }
         }
     }
@@ -113,7 +124,7 @@ SetupPage {
         FocusScope {
             id: tabBar
             x: page.immersive ? Theme.px(56) : Theme.gutter
-            y: page.immersive ? Theme.px(30) : Theme.px(170)
+            y: page.immersive ? Theme.px(24) : Theme.px(160)
             width: tabRow.width
             height: tabRow.height
             // На весь экран вкладки остаются видны, но меньше
@@ -131,60 +142,102 @@ SetupPage {
 
             Row {
                 id: tabRow
-                spacing: Theme.px(10)
+                spacing: Theme.px(16)
 
                 ButtonGlyph {
                     button: "l1"
-                    size: Theme.px(28)
+                    size: Theme.px(30)
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: page.tab > 0 ? 1 : 0.4
                 }
-                Item { width: Theme.px(8); height: 1 }
 
-                Repeater {
-                    model: page.tabs
-                    delegate: Item {
-                        id: tabItem
-                        required property var modelData
-                        required property int index
-                        readonly property bool selected: page.tab === index
-                        readonly property bool focused: selected && tabBar.activeFocus
+                // Дорожка вкладок: стеклянная «пилюля», по ней скользит индикатор выбранной
+                Rectangle {
+                    id: track
+                    width: tabStrip.width + 2 * padding
+                    height: Theme.px(64) + 2 * padding
+                    radius: height / 2
+                    color: Qt.rgba(0.06, 0.066, 0.078, 0.42)
+                    border.width: 1
+                    border.color: Theme.glassBorder
+                    anchors.verticalCenter: parent.verticalCenter
 
-                        width: tabLabel.implicitWidth + Theme.px(56)
-                        height: Theme.px(60)
+                    readonly property real padding: Theme.px(6)
+                    readonly property Item selectedItem: {
+                        page.tab
+                        tabRepeater.count
+                        return tabRepeater.itemAt(page.tab)
+                    }
 
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: height / 2
-                            color: tabItem.focused ? Theme.focus : Qt.rgba(1, 1, 1, 0.12)
-                            opacity: tabItem.selected ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: Theme.animFast } }
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                    Rectangle {
+                        id: indicator
+                        x: track.padding + (track.selectedItem ? track.selectedItem.x : 0)
+                        y: track.padding
+                        width: track.selectedItem ? track.selectedItem.width : 0
+                        height: Theme.px(64)
+                        radius: height / 2
+                        color: tabBar.activeFocus ? Theme.focus : Theme.selection
+                        border.width: tabBar.activeFocus ? 0 : 1
+                        border.color: Qt.rgba(1, 1, 1, 0.16)
+                        Behavior on x { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutQuint } }
+                        Behavior on width { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutQuint } }
+                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
+
+                        // Мягкий ореол индикатора, когда фокус на вкладках
+                        FocusRing {
+                            shown: tabBar.activeFocus
+                            radius: indicator.radius
+                            gap: 0
+                            ringWidth: 0
                         }
-                        Text {
-                            id: tabLabel
-                            anchors.centerIn: parent
-                            text: tabItem.modelData.title
-                            color: tabItem.focused ? Theme.background
-                                 : tabItem.selected ? Theme.textPrimary : Theme.textSecondary
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontBody
-                            font.weight: tabItem.selected ? Font.Medium : Font.Normal
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                page.setTab(tabItem.index)
-                                tabBar.forceActiveFocus()
+                    }
+
+                    Row {
+                        id: tabStrip
+                        x: track.padding
+                        y: track.padding
+
+                        Repeater {
+                            id: tabRepeater
+                            model: page.tabs
+                            delegate: Item {
+                                id: tabItem
+                                required property var modelData
+                                required property int index
+                                readonly property bool selected: page.tab === index
+                                readonly property bool focused: selected && tabBar.activeFocus
+
+                                width: tabLabel.implicitWidth + Theme.px(60)
+                                height: Theme.px(64)
+
+                                Text {
+                                    id: tabLabel
+                                    anchors.centerIn: parent
+                                    text: tabItem.modelData.title
+                                    color: tabItem.focused ? Theme.textOnFocus
+                                         : tabItem.selected ? Theme.textPrimary : Theme.textSecondary
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.fontBody
+                                    font.weight: Font.DemiBold
+                                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        page.setTab(tabItem.index)
+                                        tabBar.forceActiveFocus()
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                Item { width: Theme.px(8); height: 1 }
                 ButtonGlyph {
                     button: "r1"
-                    size: Theme.px(28)
+                    size: Theme.px(30)
                     anchors.verticalCenter: parent.verticalCenter
+                    opacity: page.tab < page.tabs.length - 1 ? 1 : 0.4
                 }
             }
         }
@@ -199,8 +252,8 @@ SetupPage {
             anchors.leftMargin: page.immersive ? Theme.px(56) : Theme.gutter
             anchors.rightMargin: page.immersive ? Theme.px(56) : Theme.gutter
             // Под вкладками; на весь экран вкладки меньше и выше
-            anchors.topMargin: page.immersive ? Theme.px(30) + tabBar.height * 0.8 + Theme.px(28)
-                                              : Theme.px(170) + tabBar.height + Theme.px(64)
+            anchors.topMargin: page.immersive ? Theme.px(24) + tabBar.height * 0.8 + Theme.px(28)
+                                              : Theme.px(160) + tabBar.height + Theme.px(60)
             anchors.bottomMargin: page.immersive ? Theme.px(100) : Theme.px(140)
             Behavior on anchors.leftMargin { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutCubic } }
             Behavior on anchors.rightMargin { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutCubic } }

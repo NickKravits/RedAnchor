@@ -24,6 +24,10 @@ set(QML_SOURCES
     qml/Keyboard.qml
     qml/components/Icon.qml
     qml/components/AppBackground.qml
+    qml/components/FocusRing.qml
+    qml/components/GlassPanel.qml
+    qml/components/Badge.qml
+    qml/components/ProgressBar.qml
     qml/components/ButtonGlyph.qml
     qml/components/ConsoleButton.qml
     qml/components/ConsoleListItem.qml

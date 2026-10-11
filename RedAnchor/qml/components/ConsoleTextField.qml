@@ -46,15 +46,30 @@ FocusScope {
             font.pixelSize: Theme.fontSmall
         }
 
-        Rectangle {
+        Item {
             width: parent.width
             height: Theme.px(72)
-            radius: Theme.radius
-            color: root.activeFocus || root.editing ? Theme.surfaceRaised : Theme.surface
-            border.width: 1
-            border.color: root.errorText !== "" ? Theme.accent
-                        : (root.activeFocus || root.editing ? Qt.rgba(1, 1, 1, 0.6) : Theme.outline)
-            Behavior on border.color { ColorAnimation { duration: Theme.animFast } }
+
+            // Ореол фокуса
+            FocusRing {
+                shown: root.activeFocus || root.editing
+                radius: Theme.radius
+                gap: 0
+                ringWidth: 0
+            }
+
+            Rectangle {
+                id: box
+                anchors.fill: parent
+                radius: Theme.radius
+                color: root.editing ? Theme.surfaceFocus : root.activeFocus ? Theme.surfaceRaised : Theme.glass
+                border.width: root.activeFocus || root.editing || root.errorText !== "" ? Theme.focusRingWidth - 1 : 1
+                border.color: root.errorText !== "" ? Theme.accent
+                            : (root.activeFocus || root.editing ? Theme.focus : Theme.glassBorder)
+                antialiasing: true
+                Behavior on border.color { ColorAnimation { duration: Theme.animFast } }
+                Behavior on color { ColorAnimation { duration: Theme.animFast } }
+            }
 
             Row {
                 anchors.left: parent.left

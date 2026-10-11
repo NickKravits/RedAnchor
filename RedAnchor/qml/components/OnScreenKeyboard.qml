@@ -186,13 +186,26 @@ FocusScope {
         id: panel
         width: root.width
         height: content.height + Theme.px(140)
-        color: "#0d0f12"
-        opacity: 0.97
+        // Непрозрачный графит: сверху чуть светлее, книзу темнее
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(0.085, 0.092, 0.108, 1.0) }
+            GradientStop { position: 1.0; color: Qt.rgba(0.045, 0.05, 0.06, 1.0) }
+        }
 
+        // Светлая кромка по верхнему краю и мягкая тень над ней
+        Rectangle {
+            width: parent.width
+            height: Theme.px(28)
+            y: -height
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.30) }
+            }
+        }
         Rectangle {
             width: parent.width
             height: 1
-            color: Theme.outlineStrong
+            color: Qt.rgba(1, 1, 1, 0.16)
         }
 
         Column {
@@ -268,24 +281,33 @@ FocusScope {
                                 Rectangle {
                                     anchors.fill: parent
                                     anchors.margins: root.keyGap / 2
-                                    radius: Theme.px(8)
-                                    scale: keyItem.current ? 1.06 : 1
+                                    radius: Theme.radiusSmall + Theme.px(2)
+                                    scale: keyItem.current ? 1.08 : 1
                                     color: keyItem.current ? Theme.focus
-                                         : keyItem.modelData.action === "done" ? Qt.rgba(1, 1, 1, 0.16)
-                                         : (keyItem.modelData.action === "shift" && root.shift > 0) ? Qt.rgba(1, 1, 1, 0.20)
-                                         : keyItem.special ? Theme.surfaceRaised : Theme.surface
+                                         : keyItem.modelData.action === "done" ? Qt.rgba(1, 1, 1, 0.18)
+                                         : (keyItem.modelData.action === "shift" && root.shift > 0) ? Qt.rgba(1, 1, 1, 0.22)
+                                         : keyItem.special ? Qt.rgba(1, 1, 1, 0.09) : Qt.rgba(1, 1, 1, 0.055)
                                     border.width: keyItem.current ? 0 : 1
-                                    border.color: Theme.outline
+                                    border.color: Qt.rgba(1, 1, 1, 0.08)
+                                    antialiasing: true
                                     Behavior on scale { NumberAnimation { duration: 90 } }
+
+                                    // Мягкий ореол выбранной клавиши
+                                    FocusRing {
+                                        shown: keyItem.current
+                                        radius: parent.radius
+                                        gap: 0
+                                        ringWidth: 0
+                                    }
 
                                     Text {
                                         anchors.centerIn: parent
                                         visible: keyItem.modelData.label !== ""
                                         text: keyItem.modelData.label
-                                        color: keyItem.current ? Theme.background : Theme.textPrimary
+                                        color: keyItem.current ? Theme.textOnFocus : Theme.textPrimary
                                         font.family: Theme.fontFamily
                                         font.pixelSize: keyItem.special ? Theme.fontSmall : Theme.fontBody
-                                        font.weight: keyItem.special ? Font.Medium : Font.Light
+                                        font.weight: keyItem.special || keyItem.current ? Font.DemiBold : Font.Normal
                                     }
                                     Icon {
                                         anchors.centerIn: parent

@@ -268,7 +268,7 @@ ApplicationWindow {
 
             Avatar {
                 name: AccountManager.nickname
-                size: Theme.px(38)
+                size: Theme.px(42)
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
@@ -277,61 +277,81 @@ ApplicationWindow {
                 color: Theme.textPrimary
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSmall
-                font.weight: Font.Medium
+                font.weight: Font.DemiBold
             }
         }
 
         Row {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.px(26)
+            spacing: Theme.px(28)
 
-            // Активные загрузки игр; нет загрузок — значка нет
-            Row {
-                visible: StoreManager.activeDownloads > 0
-                spacing: Theme.px(8)
+            // Состояние системы — в стеклянной «пилюле»; нечего показать — её нет
+            Rectangle {
+                id: statusPill
+                visible: StoreManager.activeDownloads > 0 || BluetoothManager.audioConnected || NetworkBackend.online
                 anchors.verticalCenter: parent.verticalCenter
-                Icon {
-                    name: "download"
-                    size: Theme.px(26)
-                    lineWidth: 1.5
-                    color: Theme.textSecondary
-                    anchors.verticalCenter: parent.verticalCenter
+                width: statusRow.width + Theme.px(36)
+                height: Theme.px(48)
+                radius: height / 2
+                color: Qt.rgba(0.06, 0.066, 0.078, 0.42)
+                border.width: 1
+                border.color: Theme.glassBorder
+
+                Row {
+                    id: statusRow
+                    anchors.centerIn: parent
+                    spacing: Theme.px(22)
+
+                    // Активные загрузки игр; нет загрузок — значка нет
+                    Row {
+                        visible: StoreManager.activeDownloads > 0
+                        spacing: Theme.px(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        Icon {
+                            name: "download"
+                            size: Theme.px(24)
+                            lineWidth: 1.6
+                            color: Theme.textPrimary
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: (StoreManager.downloadProgress >= 0 ? Math.round(StoreManager.downloadProgress * 100) + "%" : "…")
+                                  + (StoreManager.activeDownloads > 1 ? qsTr(" · ещё %1").arg(StoreManager.activeDownloads - 1) : "")
+                            color: Theme.textPrimary
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSmall
+                            font.weight: Font.Medium
+                            font.features: { "tnum": 1 }
+                        }
+                    }
+                    // Bluetooth-гарнитура или наушники
+                    Icon {
+                        visible: BluetoothManager.audioConnected
+                        name: "headphones"
+                        size: Theme.px(24)
+                        lineWidth: 1.6
+                        color: Theme.textPrimary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Icon {
+                        visible: NetworkBackend.online
+                        name: NetworkBackend.wiredConnected ? "ethernet" : "globe"
+                        size: Theme.px(24)
+                        lineWidth: 1.6
+                        color: Theme.textPrimary
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: (StoreManager.downloadProgress >= 0 ? Math.round(StoreManager.downloadProgress * 100) + "%" : "…")
-                          + (StoreManager.activeDownloads > 1 ? qsTr(" · ещё %1").arg(StoreManager.activeDownloads - 1) : "")
-                    color: Theme.textSecondary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSmall
-                    font.features: { "tnum": 1 }
-                }
-            }
-            // Bluetooth-гарнитура или наушники
-            Icon {
-                visible: BluetoothManager.audioConnected
-                name: "headphones"
-                size: Theme.px(26)
-                lineWidth: 1.5
-                color: Theme.textSecondary
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            Icon {
-                visible: NetworkBackend.online
-                name: NetworkBackend.wiredConnected ? "ethernet" : "globe"
-                size: Theme.px(26)
-                lineWidth: 1.5
-                color: Theme.textSecondary
-                anchors.verticalCenter: parent.verticalCenter
             }
             Text {
                 id: clock
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.textPrimary
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontBody
-                font.weight: Font.Light
+                font.pixelSize: Theme.px(28)
+                font.weight: Font.Normal
                 font.features: { "tnum": 1 }
                 text: Qt.formatTime(new Date(), "HH:mm")
                 Timer {

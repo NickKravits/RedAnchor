@@ -56,11 +56,13 @@ SetupPage {
 
             Rectangle {
                 width: Theme.px(420)
-                height: Theme.px(2)
-                color: Qt.rgba(1, 1, 1, 0.10)
+                height: Math.max(2, Theme.px(4))
+                radius: height / 2
+                color: Theme.progressTrack
                 Rectangle {
                     height: parent.height
-                    color: Theme.textPrimary
+                    radius: height / 2
+                    color: Theme.progressFill
                     NumberAnimation on width {
                         from: 0; to: Theme.px(420); duration: 3500
                         easing.type: Easing.InOutQuad
