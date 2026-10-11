@@ -6,13 +6,11 @@
 #   redanchor-components system    — всё для сессии: gamescope (Weston и cage как запасные),
 #                                    Xwayland, libxcb-cursor0 (Qt внутри gamescope), Python 3
 #                                    (на нём написан Proton), PipeWire/WirePlumber (громкость),
-#                                    шрифт Inter, BlueZ, NetworkManager
+#                                    шрифт Inter, BlueZ, NetworkManager, правила udev для
+#                                    геймпадов (steam-devices)
 #   redanchor-components drivers   — графический драйвер: NVIDIA (ubuntu-drivers / nvidia-driver)
 #                                    или Mesa для AMD и Intel (64 и 32 бита) с прошивками
 #   redanchor-components vulkan    — загрузчик Vulkan и драйверы Mesa Vulkan (64 и 32 бита)
-#   redanchor-components steam     — официальный клиент Steam (steam-installer из multiverse/contrib,
-#                                    иначе steam_latest.deb с repo.steampowered.com), steam-devices
-#                                    и 32-битные библиотеки. Дальше Steam обновляется сам.
 #
 # Вывод для оболочки: «PROGRESS <0..100> <текст>» и «REBOOT», если нужна перезагрузка.
 # Остальной вывод apt уходит в stderr (журнал оболочки).
@@ -21,7 +19,6 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C.UTF-8 2>/dev/null || true
 
-STEAM_DEB_URL="https://repo.steampowered.com/steam/archive/stable/steam_latest.deb"
 # Сколько секунд ждать, пока dpkg занят другим процессом (например, unattended-upgrades)
 LOCK_TIMEOUT=600
 APT_OPTS=(-q -o "DPkg::Lock::Timeout=${LOCK_TIMEOUT}"
@@ -277,12 +274,17 @@ install_system() {
     PSTART=60 PEND=99
     local optional=(gamescope weston cage xwayland fonts-inter
                     bluez network-manager polkitd pkexec policykit-1
-                    curl ca-certificates tar xz-utils unzip mesa-utils)
+                    curl ca-certificates tar xz-utils unzip mesa-utils steam-devices)
     # Звук: PipeWire ставим, если нет ни wpctl, ни pactl (PulseAudio не трогаем)
     if command -v wpctl >/dev/null 2>&1 || ! command -v pactl >/dev/null 2>&1; then
         optional+=(pipewire pipewire-pulse wireplumber)
     fi
     apt_install_optional "${optional[@]}"
+    # Правила udev для геймпадов (steam-devices) — сразу в силе
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload >&2 || true
+        udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc >&2 || true
+    fi
     if ! command -v gamescope >/dev/null 2>&1 && [[ ! -x /usr/games/gamescope ]]; then
         log "gamescope недоступен в репозиториях этой системы — сессия запустится в Weston (или cage)"
     fi
@@ -345,125 +347,10 @@ install_drivers() {
     esac
 }
 
-# Пакет клиента и его 32-битные библиотеки — явно: так решателю apt не нужно догадываться,
-# что steam-libs-i386 ставится для архитектуры i386
-steam_packages() {
-    echo "$1"
-    local pkg
-    for pkg in steam-libs-amd64 steam-libs-i386:i386; do
-        pkg_available "$pkg" && echo "$pkg"
-    done
-}
-
-# Репозиторий Valve (его добавляет пакет steam-launcher). Его steam-libs-* новее
-# Ubuntu-шных, и steam-installer из Ubuntu, которому нужны строго свои версии, с ним не
-# ставится («Reached two conflicting assignments»). Источники не смешиваем.
-VALVE_LISTS=(/etc/apt/sources.list.d/steam-stable.list /etc/apt/sources.list.d/steam-beta.list)
-
-disable_valve_repo() {
-    local list changed=0
-    for list in "${VALVE_LISTS[@]}"; do
-        [[ -f $list ]] || continue
-        backup_source "$list"
-        rm -f "$list"
-        changed=1
-    done
-    if [[ $changed -eq 1 ]]; then
-        log "репозиторий Valve отключён (копия — в /var/backups/redanchor): ставим Steam из Ubuntu"
-        SOURCES_CHANGED=1
-    fi
-}
-
-# Официальный пакет Steam от Valve (steam-launcher, добавляет репозиторий Valve)
-install_steam_deb() {
-    progress 10 "Загрузка клиента Steam с repo.steampowered.com"
-    command -v curl >/dev/null 2>&1 || apt_install_required curl ca-certificates
-    local tmp
-    tmp=$(mktemp -d /tmp/redanchor-steam.XXXXXX)
-    # shellcheck disable=SC2064
-    trap "rm -rf '$tmp'" EXIT
-    chmod 755 "$tmp"   # apt читает файл от пользователя _apt
-    curl -fL --retry 3 --connect-timeout 20 -o "$tmp/steam.deb" "$STEAM_DEB_URL" >&2
-    chmod 644 "$tmp/steam.deb"
-    PSTART=20 PEND=60
-    apt_install_required "$tmp/steam.deb"
-    # steam-launcher добавляет репозиторий Valve — его 32-битные библиотеки ставим оттуда же
-    SOURCES_CHANGED=1
-    apt_update
-    PSTART=60 PEND=70
-    # shellcheck disable=SC2046
-    apt_install_required $(steam_packages steam-launcher)
-}
-
-install_steam() {
-    prepare
-    # Лицензия Steam: без ответа debconf установка в неинтерактивном режиме обрывается
-    local owner
-    for owner in steam steam-installer steam-launcher; do
-        echo "$owner steam/question select I AGREE" | debconf-set-selections 2>/dev/null || true
-        echo "$owner steam/license note " | debconf-set-selections 2>/dev/null || true
-        echo "$owner steam/purge note " | debconf-set-selections 2>/dev/null || true
-    done
-    if is_ubuntu; then
-        # steam-installer — в multiverse, а его 32-битные библиотеки (steam-libs:i386) с
-        # Ubuntu 26.04 — в universe
-        enable_component universe
-        enable_component multiverse
-    elif is_debian; then
-        enable_component contrib
-    fi
-    apt_update
-
-    # Клиент из Ubuntu ставим без репозитория Valve (если steam-launcher от Valve ещё не стоит).
-    # Недоустановленный steam-launcher (прошлая неудачная попытка) убираем — иначе он
-    # держит зависимости и мешает
-    if ! pkg_installed steam-launcher; then
-        if dpkg-query -W steam-launcher >/dev/null 2>&1; then
-            log "убираем недоустановленный steam-launcher"
-            dpkg --purge --force-depends steam-launcher >&2 || true
-            apt-get purge -y "${APT_OPTS[@]}" steam-libs-i386:i386 steam-libs-amd64 >&2 || true
-            repair_dpkg
-        fi
-        disable_valve_repo
-        apt_update
-    fi
-
-    # shellcheck disable=SC2046
-    if pkg_installed steam-installer || pkg_installed steam-launcher || pkg_installed steam || pkg_installed steam:i386; then
-        log "клиент Steam уже установлен"
-    elif pkg_available steam-installer && { PSTART=10 PEND=70; apt_install_required $(steam_packages steam-installer); }; then
-        log "клиент Steam установлен из репозитория дистрибутива"
-    else
-        # Пакета нет в репозиториях или он не встал (зависимости, прерванная установка) —
-        # убираем остатки и ставим официальный steam_latest.deb от Valve
-        if pkg_available steam-installer; then
-            log "steam-installer не установился — ставим пакет Steam от Valve"
-            apt-get purge -y "${APT_OPTS[@]}" steam-installer steam-libs:i386 steam-libs-i386:i386 >&2 || true
-            repair_dpkg
-        fi
-        install_steam_deb
-    fi
-    # Правила udev для контроллеров (DualSense, Xbox, Steam Controller), 32-битные библиотеки
-    # и Xvfb — на невидимом экране оболочка делает первую загрузку клиента Steam
-    PSTART=70 PEND=99
-    apt_install_optional steam-devices steam-libs-amd64 steam-libs-i386 \
-        libc6:i386 libgl1:i386 libgl1-mesa-dri:i386 libegl1:i386 libvulkan1:i386 \
-        mesa-vulkan-drivers:i386 libudev1:i386 libgbm1:i386 zenity xdg-utils xvfb
-    if command -v udevadm >/dev/null 2>&1; then
-        udevadm control --reload >&2 || true
-        udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc >&2 || true
-    fi
-    if ! command -v steam >/dev/null 2>&1 && [[ ! -x /usr/games/steam && ! -x /usr/bin/steam ]]; then
-        echo "redanchor-components: Steam не установился" >&2
-        exit 1
-    fi
-}
-
 case "${1:-}" in
     system) install_system ;;
     drivers) install_drivers ;;
     vulkan) install_vulkan ;;
-    steam) install_steam ;;
-    *) echo "usage: redanchor-components system|drivers|vulkan|steam" >&2; exit 1 ;;
+    *) echo "usage: redanchor-components system|drivers|vulkan" >&2; exit 1 ;;
 esac
 progress 100 "Готово"

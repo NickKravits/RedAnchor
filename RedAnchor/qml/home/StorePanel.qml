@@ -4,18 +4,16 @@ import "ModelSync.js" as ModelSync
 import "Format.js" as Format
 import "Compat.js" as Compat
 
-// Раздел магазина (Steam, GOG): вход и игры библиотеки сеткой. Библиотеку Steam, имя
-// профиля и аватар даёт клиент Steam (вход — один раз в Big Picture), купленные игры GOG — gogdl.
+// Раздел магазина (GOG): вход и купленные игры сеткой (gogdl).
 // ✕ на игре — установить; на установленной или загружаемой — меню действий.
-// Клиент Steam и загрузчик GOG ставятся в «Настройки → Обновления».
+// Загрузчик GOG ставится в «Настройки → Обновления».
 FocusScope {
     id: root
 
-    property string store                       // "steam" | "gog"
+    property string store                       // "gog"
     readonly property var state_: StoreManager.stores[store] || ({})
     // Без загрузчика выбирать нечего — фокус остаётся на панели магазинов
     readonly property bool focusable: state_.toolInstalled === true
-    readonly property bool isSteam: store === "steam"
 
     // Встроенный браузер для входа (GOG) открывает главный экран
     signal webLoginRequested(string store)
@@ -84,7 +82,7 @@ FocusScope {
         if (!root.state_.toolInstalled)
             root.forceActiveFocus()
         else if (!root.state_.signedIn)
-            (root.isSteam ? steamForm : signInButton).forceActiveFocus()
+            signInButton.forceActiveFocus()
         else if (grid.count > 0)
             grid.forceActiveFocus()
         else
@@ -140,8 +138,7 @@ FocusScope {
         anchors.verticalCenterOffset: -Theme.px(30)
         icon: "download"
         title: qsTr("Нужно установить обновления")
-        text: root.isSteam ? qsTr("Для Steam нужен официальный клиент Steam. Установите его: Настройки → Обновления.")
-                           : qsTr("Для GOG нужен загрузчик игр gogdl. Установите его: Настройки → Обновления.")
+        text: qsTr("Для GOG нужен загрузчик игр gogdl. Установите его: Настройки → Обновления.")
     }
 
     // ---------- Вход ----------
@@ -150,11 +147,10 @@ FocusScope {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Theme.px(60)
-        width: Math.min(parent.width, root.isSteam ? Theme.px(1100) : Theme.px(860))
+        width: Math.min(parent.width, Theme.px(860))
         spacing: Theme.px(28)
 
         EmptyState {
-            visible: !root.isSteam
             anchors.horizontalCenter: parent.horizontalCenter
             icon: "user"
             title: qsTr("Войдите в %1").arg(Format.storeName(root.store))
@@ -162,7 +158,6 @@ FocusScope {
         }
         ConsoleButton {
             id: signInButton
-            visible: !root.isSteam
             anchors.horizontalCenter: parent.horizontalCenter
             text: root.state_.busy ? qsTr("Вход…") : qsTr("Войти")
             icon: "user"
@@ -170,15 +165,9 @@ FocusScope {
             enabledState: !root.state_.busy
             onClicked: root.webLoginRequested(root.store)
         }
-
-        SteamLoginForm {
-            id: steamForm
-            visible: root.isSteam
-            width: parent.width
-        }
     }
 
-    // ---------- Игры (Steam — витрина и поиск, GOG — купленные) ----------
+    // ---------- Купленные игры ----------
     Item {
         anchors.fill: parent
         visible: root.state_.toolInstalled && root.state_.signedIn
@@ -187,7 +176,7 @@ FocusScope {
             id: accountRow
             spacing: Theme.px(20)
 
-            // Аватар профиля (Steam), без него — буква имени
+            // Аватар профиля, без него — буква имени
             Item {
                 width: Theme.px(44)
                 height: width
@@ -225,9 +214,6 @@ FocusScope {
                 Text {
                     text: root.state_.busy ? qsTr("Обновление библиотеки…")
                         : root.state_.message ? root.state_.message
-                        : root.isSteam && root.state_.phase === "starting" ? qsTr("Steam запускается… · Игр: %1").arg(grid.count)
-                        : root.isSteam && root.state_.phase === "stopping" ? qsTr("Steam перезапускается… · Игр: %1").arg(grid.count)
-                        : root.isSteam && root.state_.online ? qsTr("Steam в сети · Игр: %1").arg(grid.count)
                         : qsTr("Игр: %1").arg(grid.count)
                     color: Theme.textSecondary
                     font.family: Theme.fontFamily
@@ -270,8 +256,7 @@ FocusScope {
             anchors.centerIn: parent
             icon: "store"
             title: qsTr("Игр не найдено")
-            text: root.isSteam ? qsTr("В библиотеке Steam пока нет игр.")
-                               : qsTr("В этом аккаунте %1 пока нет игр.").arg(Format.storeName(root.store))
+            text: qsTr("В этом аккаунте %1 пока нет игр.").arg(Format.storeName(root.store))
         }
 
         GridView {

@@ -41,7 +41,6 @@ FocusScope {
             returnFocus = null
         }
     }
-    readonly property bool steamGame: game && game.store === "steam"
     Keys.onPressed: (event) => {
         if (root.failed && (event.key === Qt.Key_Escape || event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
             GameLauncher.dismiss()
@@ -184,9 +183,7 @@ FocusScope {
             visible: !root.failed && !root.running && GameLauncher.slow
             width: parent.width
             wrapMode: Text.WordWrap
-            text: root.steamGame
-                  ? qsTr("Запуск идёт дольше обычного: перед первым запуском Steam ставит Proton и готовит игру — это может занять несколько минут.")
-                  : qsTr("Запуск идёт дольше обычного: первый запуск игры через Proton может занять пару минут.")
+            text: qsTr("Запуск идёт дольше обычного: первый запуск игры через Proton может занять пару минут.")
             color: Theme.textSecondary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSmall

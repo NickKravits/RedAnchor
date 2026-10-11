@@ -117,10 +117,8 @@ void GameArt::startNext()
 
 void GameArt::resolveGame(Job job)
 {
-    // Steam — по номеру приложения, остальные магазины — поиском по названию
-    const QString path = job.store == QLatin1String("steam")
-            ? QStringLiteral("/games/steam/") + job.appId
-            : QStringLiteral("/search/autocomplete/") + QString::fromLatin1(QUrl::toPercentEncoding(job.title));
+    // Игра ищется по названию
+    const QString path = QStringLiteral("/search/autocomplete/") + QString::fromLatin1(QUrl::toPercentEncoding(job.title));
     QNetworkReply *reply = api(path);
     connect(reply, &QNetworkReply::finished, this, [this, reply, job]() mutable {
         reply->deleteLater();

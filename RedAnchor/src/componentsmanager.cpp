@@ -112,15 +112,9 @@ ComponentsManager::ComponentsManager(QObject *parent)
          tr("gamescope, Xwayland, Python 3, PipeWire и шрифт Inter — для сессии и запуска игр")},
         {QStringLiteral("drivers"), tr("Графический драйвер"), driver},
         {QStringLiteral("vulkan"), tr("Vulkan"), tr("Графический интерфейс для игр и Proton")},
-        {QStringLiteral("steam"), tr("Steam"), tr("Официальный клиент: вход один раз в Big Picture, дальше обновляется сам")},
         {QStringLiteral("proton"), tr("Proton"), tr("GE-Proton — запуск Windows-игр из GOG")},
         {QStringLiteral("gogdl"), tr("gogdl"), tr("Загрузка игр из GOG"), false},
     };
-}
-
-QString ComponentsManager::steamExecutable()
-{
-    return findProgram(QStringLiteral("steam"), kSystemDirs);
 }
 
 QString ComponentsManager::detectGpuVendor()
@@ -385,7 +379,7 @@ QString ComponentsManager::toolRepo(const QString &)
     return QStringLiteral("Heroic-Games-Launcher/heroic-gogdl");
 }
 
-// DepotDownloader больше не нужен: Steam ставит и запускает игры сам
+// Остатки прежних версий: DepotDownloader (игры Steam) больше не нужен
 void ComponentsManager::removeObsoleteTools()
 {
     const QString dir = toolsDir();
@@ -539,8 +533,6 @@ void ComponentsManager::checkPackages()
         QStringLiteral("mesa-vulkan-drivers"), QStringLiteral("mesa-vulkan-drivers:i386"),
         QStringLiteral("libgl1-mesa-dri"), QStringLiteral("libgl1-mesa-dri:i386"),
         QStringLiteral("nvidia-driver"), QStringLiteral("nvidia-driver-*"),
-        QStringLiteral("steam-installer"), QStringLiteral("steam-launcher"), QStringLiteral("steam"),
-        QStringLiteral("steam:i386"), QStringLiteral("steam-devices"),
         QStringLiteral("gamescope"), QStringLiteral("libxcb-cursor0"),
         QStringLiteral("fonts-inter"), QStringLiteral("fonts-inter-variable"),
     };
@@ -625,31 +617,6 @@ void ComponentsManager::applyPackageState(const QHash<QString, QString> &install
         } else {
             setState(QStringLiteral("system"), QStringLiteral("installed"));
         }
-    }
-
-    // --- Steam: достаточно исполняемого файла, обновляется он сам ---
-    {
-        const QString steam = steamExecutable();
-        QString version = native(QStringLiteral("steam-installer"));
-        if (version.isEmpty())
-            version = native(QStringLiteral("steam-launcher"));
-        if (version.isEmpty())
-            version = any(QStringLiteral("steam"));
-        if (Component *c = find(QStringLiteral("steam")))
-            c->version = steam.isEmpty() ? QString() : version;
-        // Правила udev для контроллеров: steam-devices (Ubuntu, Debian) или из steam-launcher (Valve)
-        bool udevRules = !any(QStringLiteral("steam-devices")).isEmpty();
-        for (const QString &dir : {QStringLiteral("/usr/lib/udev/rules.d"), QStringLiteral("/lib/udev/rules.d"),
-                                   QStringLiteral("/etc/udev/rules.d")}) {
-            if (QFileInfo::exists(dir + QStringLiteral("/60-steam-input.rules")))
-                udevRules = true;
-        }
-        QString note;
-        if (!steam.isEmpty() && dpkgOk && !udevRules && !m_attempted.contains(QStringLiteral("steam")))
-            note = tr("Нет правил для контроллеров (steam-devices)");
-        // Без steam-devices геймпады в играх работают хуже — предлагаем доустановить
-        setState(QStringLiteral("steam"), steam.isEmpty() || !note.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
-                 note);
     }
 
     if (!dpkgOk) {
@@ -755,7 +722,7 @@ void ComponentsManager::install(const QString &key)
     c->state = QStringLiteral("queued");
     c->message.clear();
     c->progress = -1;
-    // Очередь держим в порядке установки: драйверы раньше Steam, Steam раньше Proton
+    // Очередь держим в порядке установки: драйверы раньше Vulkan, Vulkan раньше Proton
     auto pos = std::find_if(m_queue.begin(), m_queue.end(), [&](const QString &k) { return rank(k) > rank(key); });
     m_queue.insert(pos, key);
     emit componentsChanged();

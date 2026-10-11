@@ -50,41 +50,22 @@
 
 ### Магазины, библиотека и хранилище
 
-Во вкладке **Магазин** — разделы RedStore (пока в разработке), Steam и GOG; переключение L2 / R2.
+Во вкладке **Магазин** — разделы RedStore (пока в разработке) и GOG; переключение L2 / R2.
 Пока фокус в магазине, он раскрывается на весь экран: верхняя строка (аккаунт, время) скрывается,
 фон становится однотонным, вкладки и разделы — компактнее.
 
-Клиент Steam и загрузчик gogdl для GOG ставятся в **Настройки → Обновления**; если их нет,
-магазин предлагает установить обновления там.
+Загрузчик gogdl для GOG ставится в **Настройки → Обновления**; если его нет, магазин предлагает
+установить обновления там.
 
-- **Steam** — официальный клиент Steam (обновляется сам). На одного пользователя консоли —
-  один аккаунт Steam: у каждого пользователя свой каталог клиента (клиент запускается с
-  `HOME=~/.local/share/redanchor/steam/<id>` — в пути не должно быть пробелов, иначе скрипт
-  запуска Steam из Ubuntu не может проверить загруженный клиент). Вход — **один раз**: «Войти в Steam» открывает
-  Steam Big Picture поверх оболочки (в gamescope, как игру), войти можно геймпадом или по
-  QR-коду из мобильного приложения Steam. Как только вход удался, Big Picture закрывается сам,
-  а клиент дальше работает в фоне (`-silent`) и сам входит при каждом запуске оболочки.
-  - **Библиотека** читается из файлов клиента: купленные игры — `appcache/packageinfo.vdf`
-    (пакеты лицензий, в том числе семейная библиотека) и `appcache/appinfo.vdf` (названия, типы),
-    установленные — `steamapps/appmanifest_*.acf` во всех папках библиотек.
-  - **Установка** — прямо из оболочки: оболочка кладёт в библиотеку клиента appmanifest игры
-    с флагом «нужно обновление» и высоким приоритетом и тихо перезапускает клиент в фоне —
-    Steam сам начинает загрузку, прогресс виден в оболочке. Если Steam за пару минут не начал
-    загрузку, оболочка один раз повторяет это сама, потом показывает ошибку с «Повторить».
-  - **Steam никогда не показывается**, кроме входа: никаких окон Big Picture для покупок,
-    установки или запуска — всё делает оболочка.
-  - Клиент настраивается сам: Steam Play для всех игр Windows (Proton Experimental — его
-    Steam ставит и обновляет сам), Steam Input для геймпадов PlayStation выключен (геймпадом
-    управляет оболочка — иначе Steam в фоне превращал бы геймпад в мышь и клавиатуру).
 - **GOG** — gogdl. Вход через встроенный браузер (отдельное окно, Qt WebEngine), управляемый
   геймпадом: крестовина выбирает элементы страницы, ✕ нажимает (на поле ввода — экранная
   клавиатура), △ отправляет форму, ○ — отмена, правый стик — курсор (только в этом окне).
 
+Steam оболочка пока не поддерживает.
+
 У каждого пользователя консоли свои входы в магазины и свои игры — всё лежит в его профиле:
-`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/gog/` (игры Steam — в библиотеке его
-клиента, `~/.local/share/redanchor/steam/<id>/.steam/debian-installation/steamapps`). Удаление учётной записи удаляет и
-её игры. При смене пользователя загрузки GOG останавливаются, клиент Steam прежнего
-пользователя закрывается, а нового — запускается.
+`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/<магазин>/`. Удаление учётной записи
+удаляет и её игры. При смене пользователя загрузки останавливаются.
 
 Поставленная на загрузку игра сразу появляется в **Библиотеке** (с прогрессом) — её уже можно
 закрепить на главном экране; во вкладке **Мои игры** закреплённые игры идут рядом крупных
@@ -97,26 +78,19 @@
 Обложки — из SteamGridDB: квадратная обложка, широкий фон и, если есть, видео-обложка WebM.
 Ключ API задаётся опцией CMake `REDANCHOR_STEAMGRIDDB_KEY`.
 
-**Поддержка геймпада.** У выбранной в магазине игры видно, поддерживает ли она геймпад:
-для Steam — по данным магазина Steam (поддержка контроллеров, отдельно PS5 / DualSense и PS4),
-для GOG — по списку возможностей игры. Если игра официально не поддерживает DualSense,
+**Поддержка геймпада.** У выбранной в магазине игры видно, поддерживает ли она геймпад
+(для GOG — по списку возможностей игры). Если игра официально не поддерживает DualSense,
 перед установкой предупреждаем о системе раскладки RedAnchor (управление может быть неточным,
 значки — некорректными); если только мышь и клавиатура — что играть на геймпаде не получится.
 
 **Запуск игр** — ✕ в «Моих играх» и библиотеке, меню игры — Options.
-- **Steam** — через клиент Steam (`steam -applaunch`): Proton, среда выполнения, защита от
-  копирования (DRM), облачные сохранения и сетевая игра работают как в обычном Steam.
-  У установленных игр в параметрах запуска стоит обёртка оболочки
-  (`~/.local/share/redanchor/steam-game-wrapper %command%`): перед запуском оболочка кладёт рядом
-  настройки ввода игры; запускается режим по умолчанию, без окна выбора режима.
 - **GOG** — `gogdl launch` с GE-Proton (Настройки → Обновления) в качестве обёртки. У каждой игры
   свой префикс Wine (`profiles/<id>/prefixes/`), вывод — в `profiles/<id>/logs/`.
 
 Игра считается запущенной, пока живы её процессы (лаунчеры часто запускают игру и выходят), —
 до этого оболочка показывает фон и название игры; если игра официально не поддерживает
 DualSense — рисунок DualSense и предупреждение о системе раскладки. Закрыть игру — PS → игра →
-«Закрыть игру» (у GOG закрывается и весь сеанс Wine игры). Журнал клиента Steam —
-`profiles/<id>/logs/steam.log`.
+«Закрыть игру» (закрывается и весь сеанс Wine игры).
 
 **Геймпад.** Тачпад DualSense / DualShock 4 система считает мышью — касания двигали бы курсор.
 Оболочка забирает тачпад себе, а правило udev (`70-redanchor-dualsense.rules`) скрывает его от
@@ -129,16 +103,15 @@ libinput ещё до запуска оболочки. Если после зак
   (на Debian — `nvidia-driver` из non-free) и его 32-битная часть; заработает после перезагрузки.
   AMD и Intel — Mesa (`libgl1-mesa-dri`, 64 и 32 бита) и прошивки.
 - **Vulkan.** `libvulkan1`, `mesa-vulkan-drivers` (64 и 32 бита) и `vulkan-tools`.
-- **Системные компоненты.** gamescope (и cage про запас), Xwayland, `libxcb-cursor0`, Python 3
-  (на нём написан Proton), PipeWire/WirePlumber, шрифт Inter, BlueZ, NetworkManager.
-- **Steam.** Официальный клиент (`steam-installer` из multiverse/contrib, иначе `steam_latest.deb`
-  от Valve), `steam-devices` и 32-битные библиотеки. Обновляется сам — состояния «обновление» нет.
+- **Системные компоненты.** gamescope (Weston и cage про запас), Xwayland, `libxcb-cursor0`, Python 3
+  (на нём написан Proton), PipeWire/WirePlumber, шрифт Inter, BlueZ, NetworkManager, правила
+  udev для геймпадов (`steam-devices`).
 - **gogdl.** Загрузчик игр GOG — последний выпуск с GitHub,
   в `~/.local/share/RedAnchor/RedAnchor Shell/tools/`.
 - **Proton.** Последний GE-Proton с GitHub, проверяется по SHA-512 и распаковывается в
   `~/.local/share/RedAnchor/RedAnchor Shell/compatibilitytools/`; старые версии удаляются.
 
-Системные компоненты, драйверы, Vulkan и Steam ставит помощник `redanchor-components` (apt, от root через `pkexec`;
+Системные компоненты, драйверы и Vulkan ставит помощник `redanchor-components` (apt, от root через `pkexec`;
 правило polkit `org.redanchor.shell.components` разрешает это активной сессии без пароля),
 при необходимости он включает 32-битную архитектуру (`dpkg --add-architecture i386`).
 Proton скачивается без прав root.
@@ -192,7 +165,7 @@ Proton скачивается без прав root.
 Всё ставится одной командой — от обычного пользователя, права root скрипт попросит через `sudo`:
 
 ```sh
-./install.sh              # пакеты, драйверы, Steam, Qt ≥ 6.10, сборка и установка сессии
+./install.sh              # пакеты, драйверы, Qt ≥ 6.10, сборка и установка сессии
 ./install.sh --deps-only  # только системные пакеты (без Qt из aqtinstall и без сборки)
 ./install.sh --no-build   # пакеты и Qt, но без сборки
 ./install.sh --yes        # без вопросов (например, по ssh)
@@ -205,7 +178,7 @@ Proton скачивается без прав root.
    (`dpkg --add-architecture i386`), доделывает прерванную установку пакетов (`dpkg --configure -a`)
    и ждёт, пока dpkg освободит, например, `unattended-upgrades` (до 10 минут).
 2. Ставит инструменты сборки и библиотеки, нужные Qt.
-3. Вызывает `data/redanchor-components` с целями `system`, `drivers`, `vulkan`, `steam` — тот же
+3. Вызывает `data/redanchor-components` с целями `system`, `drivers`, `vulkan` — тот же
    помощник, что ставит компоненты из «Настройки → Обновления». Он сам включает нужные компоненты
    репозиториев (universe/multiverse в Ubuntu, contrib/non-free в Debian; PPA и чужие репозитории не трогает,
    копии файлов источников — в `/var/backups/redanchor/`) и пропускает пакеты, которых нет в дистрибутиве.
@@ -235,7 +208,7 @@ Proton (GE-Proton) и gogdl ставятся не скриптом, а само�
 
 | Пакет | Зачем | Цель помощника |
 |---|---|---|
-| `gamescope` (+ `xwayland`) | композитор сессии, в нём же идут игры и Steam Big Picture | `system` |
+| `gamescope` (+ `xwayland`) | композитор сессии, в нём же идут игры | `system` |
 | `cage` | запасной композитор (если gamescope нет или не запустился) | `system` |
 | `libxcb-cursor0` и прочие `libxcb-*`, `libxkbcommon-x11-0` | Qt работает внутри gamescope через Xwayland (xcb) | `system` / install.sh |
 | `libnss3`, `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libxtst6`, `libxkbfile1`, `libasound2t64`, `libpulse0` | QtWebEngine и QtMultimedia из aqtinstall | install.sh |
@@ -246,14 +219,13 @@ Proton (GE-Proton) и gogdl ставятся не скриптом, а само�
 | `network-manager` | Wi-Fi и сеть | `system` |
 | `polkitd` + `pkexec` (`policykit-1` в Debian 12) | помощники сопряжения и установки компонентов без пароля | `system` |
 | `systemd` (logind), `udev` | питание, доступ к геймпадам (`uaccess`), `/dev/uinput` | есть в системе |
-| `util-linux` (`script`), `tar`, `coreutils` (`sha512sum`), `curl` | запуск инструментов с псевдотерминалом, распаковка и проверка Proton, загрузка Steam | есть в системе / `system` |
+| `util-linux` (`script`), `tar`, `coreutils` (`sha512sum`), `curl` | запуск инструментов с псевдотерминалом, распаковка и проверка Proton | есть в системе / `system` |
 | Драйвер: `nvidia-driver-*` + `libnvidia-gl-*:i386` или `libgl1-mesa-dri` (64 и 32 бита), `mesa-va-drivers`, `linux-firmware` | графика для игр | `drivers` |
 | `libvulkan1`, `mesa-vulkan-drivers` (64 и 32 бита), `vulkan-tools` | Vulkan для DXVK/VKD3D в Proton | `vulkan` |
-| `steam-installer` (Ubuntu multiverse, Debian contrib) или `steam-launcher` из `steam_latest.deb` Valve; `steam-devices`; `steam-libs-*`, `libc6:i386`, `libgl1:i386`, `libvulkan1:i386` | официальный клиент Steam: библиотека, загрузка и запуск игр через Proton Experimental; правила udev для контроллеров | `steam` |
 | GE-Proton, gogdl | игры GOG | ставит оболочка |
 
-Цели помощника можно запускать и вручную: `sudo bash data/redanchor-components steam`
-(после установки — `pkexec /usr/local/libexec/redanchor-components steam`). Он печатает строки
+Цели помощника можно запускать и вручную: `sudo bash data/redanchor-components system`
+(после установки — `pkexec /usr/local/libexec/redanchor-components system`). Он печатает строки
 `PROGRESS <0..100> <текст>`, вывод apt — в stderr.
 
 ## Сборка и запуск
@@ -304,7 +276,7 @@ udev переподключите геймпад (или выполните `sud
 
 ```
 src/        C++: GamepadManager (evdev), BluetoothManager (BlueZ D-Bus),
-            StoreManager (магазины), SteamClient (клиент Steam), Vdf (файлы Steam),
+            StoreManager (магазины),
             GameLibrary (игры пользователя), GameLauncher (запуск), GameArt (SteamGridDB),
             NetworkBackend (NetworkManager D-Bus), AccountManager (учётные записи),
             SystemInfo (сведения о системе)

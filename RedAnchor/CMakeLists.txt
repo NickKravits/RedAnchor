@@ -51,7 +51,6 @@ set(QML_SOURCES
     qml/components/RoundedClip.qml
     qml/components/Compat.js
     qml/components/GameLaunchOverlay.qml
-    qml/components/SteamScreen.qml
     qml/components/SystemOverlay.qml
     qml/components/Format.js
     qml/setup/ControllerScreen.qml
@@ -68,7 +67,6 @@ set(QML_SOURCES
     qml/home/LibraryView.qml
     qml/home/StoreView.qml
     qml/home/StorePanel.qml
-    qml/home/SteamLoginForm.qml
     qml/home/WebLoginWindow.qml
     qml/home/SettingsView.qml
     qml/home/settings/NetworkSettings.qml
@@ -105,8 +103,6 @@ qt_add_qml_module(appRedAnchor
         src/gameart.h src/gameart.cpp
         src/storemanager.h src/storemanager.cpp
         src/gamelauncher.h src/gamelauncher.cpp
-        src/vdf.h src/vdf.cpp
-        src/steamclient.h src/steamclient.cpp
 )
 
 include(GNUInstallDirs)

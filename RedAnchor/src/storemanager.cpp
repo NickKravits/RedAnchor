@@ -2,7 +2,6 @@
 
 #include "accountmanager.h"
 #include "gamelibrary.h"
-#include "steamclient.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -29,7 +28,7 @@
 
 namespace {
 
-const QStringList kStores = {QStringLiteral("steam"), QStringLiteral("gog")};
+const QStringList kStores = {QStringLiteral("gog")};
 
 // Вход GOG, который ожидает gogdl: код приходит в адресе on_login_success?code=…
 const QString kGogLogin = QStringLiteral(
@@ -100,7 +99,6 @@ StoreManager::StoreManager(QObject *parent)
     : QObject(parent)
     , m_network(new QNetworkAccessManager(this))
 {
-    m_steam = new SteamClient(this);
     // Сведения о поддержке геймпада общие для всех пользователей (кэш)
     const QJsonObject compat = readJson(compatFile());
     for (auto it = compat.begin(); it != compat.end(); ++it)
@@ -118,24 +116,6 @@ StoreManager::StoreManager(QObject *parent)
     });
     connect(GameLibrary::instance(), &GameLibrary::gamesChanged, this, &StoreManager::ownedChanged);
 
-    connect(m_steam, &SteamClient::stateChanged, this, &StoreManager::storesChanged);
-    connect(m_steam, &SteamClient::libraryChanged, this, &StoreManager::ownedChanged);
-    connect(m_steam, &SteamClient::downloadsChanged, this, [this] {
-        // Загружаемые игры Steam — в библиотеке с самого начала (в том числе поставленные
-        // на загрузку из Big Picture)
-        for (const SteamClient::Download &d : m_steam->downloads())
-            GameLibrary::instance()->addPending(QStringLiteral("steam"), d.appId, d.title);
-        emit downloadsChanged();
-        emit ownedChanged();
-    });
-    connect(m_steam, &SteamClient::installedChanged, this, &StoreManager::syncSteamLibrary);
-    connect(m_steam, &SteamClient::gameInstalled, this, &StoreManager::gameInstalled);
-    connect(m_steam, &SteamClient::gameRemoved, this, [this](const QString &title) {
-        GameLibrary::instance()->refreshStorage();
-        emit gameRemoved(title);
-    });
-    // Выход из оболочки — клиент Steam тоже закрываем
-    connect(qApp, &QCoreApplication::aboutToQuit, m_steam, &SteamClient::shutdown);
     reload();
 }
 
@@ -306,19 +286,6 @@ QVariantMap StoreManager::stores() const
         {QStringLiteral("message"), gog->message},
         {QStringLiteral("listTitle"), gog->listTitle},
     });
-    map.insert(QStringLiteral("steam"), QVariantMap{
-        {QStringLiteral("toolInstalled"), m_steam->installed()},
-        {QStringLiteral("signedIn"), m_steam->signedIn()},
-        {QStringLiteral("account"), m_steam->account()},
-        {QStringLiteral("avatar"), m_steam->avatar()},
-        {QStringLiteral("busy"), m_steam->busy()},
-        {QStringLiteral("message"), m_steam->message()},
-        {QStringLiteral("listTitle"), tr("Библиотека Steam")},
-        {QStringLiteral("phase"), m_steam->phase()},
-        {QStringLiteral("phaseProgress"), m_steam->phaseProgress()},
-        {QStringLiteral("online"), m_steam->online()},
-        {QStringLiteral("running"), m_steam->running()},
-    });
     return map;
 }
 
@@ -326,15 +293,8 @@ QVariantMap StoreManager::owned() const
 {
     GameLibrary *library = GameLibrary::instance();
     QVariantMap map;
-    const QList<SteamClient::Download> steamDownloads = m_steam->downloads();
     for (const QString &key : kStores) {
-        QList<OwnedGame> games;
-        if (key == QLatin1String("steam")) {
-            for (const SteamClient::OwnedGame &g : m_steam->owned())
-                games.append(OwnedGame{g.appId, g.title, QStringLiteral("game")});
-        } else {
-            games = findStore(key)->owned;
-        }
+        QList<OwnedGame> games = findStore(key)->owned;
         std::sort(games.begin(), games.end(), [](const OwnedGame &a, const OwnedGame &b) {
             return a.title.compare(b.title, Qt::CaseInsensitive) < 0;
         });
@@ -343,14 +303,6 @@ QVariantMap StoreManager::owned() const
             const QString id = key + QLatin1Char(':') + g.appId;
             QString status;
             double progress = -1;
-            if (key == QLatin1String("steam")) {
-                for (const SteamClient::Download &d : steamDownloads) {
-                    if (d.appId == g.appId) {
-                        status = d.status;
-                        progress = d.progress;
-                    }
-                }
-            }
             for (const Download &d : m_downloads) {
                 if (d.id() == id) {
                     status = d.status;
@@ -385,17 +337,6 @@ QVariantList StoreManager::downloads() const
             {QStringLiteral("message"), d.message},
         });
     }
-    for (const SteamClient::Download &d : m_steam->downloads()) {
-        list.append(QVariantMap{
-            {QStringLiteral("id"), QStringLiteral("steam:") + d.appId},
-            {QStringLiteral("store"), QStringLiteral("steam")},
-            {QStringLiteral("appId"), d.appId},
-            {QStringLiteral("title"), d.title},
-            {QStringLiteral("status"), d.status},
-            {QStringLiteral("progress"), d.progress},
-            {QStringLiteral("message"), d.message},
-        });
-    }
     return list;
 }
 
@@ -405,8 +346,6 @@ int StoreManager::activeDownloads() const
         return status == QLatin1String("queued") || status == QLatin1String("downloading");
     };
     int count = int(std::count_if(m_downloads.cbegin(), m_downloads.cend(), [&](const Download &d) { return active(d.status); }));
-    for (const SteamClient::Download &d : m_steam->downloads())
-        count += active(d.status) ? 1 : 0;
     return count;
 }
 
@@ -416,10 +355,6 @@ double StoreManager::downloadProgress() const
         if (d.id() == m_activeDownload)
             return d.progress;
     }
-    for (const SteamClient::Download &d : m_steam->downloads()) {
-        if (d.status == QLatin1String("downloading"))
-            return d.progress;
-    }
     return -1;
 }
 
@@ -427,10 +362,6 @@ QString StoreManager::downloadTitle() const
 {
     for (const Download &d : m_downloads) {
         if (d.id() == m_activeDownload)
-            return d.title;
-    }
-    for (const SteamClient::Download &d : m_steam->downloads()) {
-        if (d.status == QLatin1String("downloading"))
             return d.title;
     }
     return {};
@@ -466,23 +397,8 @@ void StoreManager::reload()
         }
         loadOwned(QStringLiteral("gog"));
     }
-    // Steam: свой клиент у каждого пользователя (прежний закрывается)
-    m_steam->setProfile(profile);
-    syncSteamLibrary();
     emit storesChanged();
     emit ownedChanged();
-}
-
-// Установленные игры Steam (в том числе поставленные через Big Picture) — в библиотеке оболочки
-void StoreManager::syncSteamLibrary()
-{
-    QList<GameLibrary::StoreGame> games;
-    for (const SteamClient::InstalledGame &g : m_steam->installedGames())
-        games.append({g.appId, g.title, g.path, g.sizeBytes});
-    QStringList pending;
-    for (const SteamClient::Download &d : m_steam->downloads())
-        pending.append(d.appId);
-    GameLibrary::instance()->syncStore(QStringLiteral("steam"), games, pending);
 }
 
 void StoreManager::loadOwned(const QString &key)
@@ -560,22 +476,8 @@ void StoreManager::completeWebLogin(const QString &key, const QString &code)
         });
 }
 
-void StoreManager::steamSignIn()
-{
-    m_steam->signIn();
-}
-
-void StoreManager::cancelSteamSignIn()
-{
-    m_steam->cancelSignIn();
-}
-
 void StoreManager::signOut(const QString &key)
 {
-    if (key == QLatin1String("steam")) {
-        m_steam->signOut();
-        return;
-    }
     const QString dir = storeDir(key);
     if (dir.isEmpty())
         return;
@@ -589,10 +491,6 @@ void StoreManager::signOut(const QString &key)
 
 void StoreManager::refresh(const QString &key)
 {
-    if (key == QLatin1String("steam")) {
-        m_steam->refreshLibrary();
-        return;
-    }
     const Store &s = store(key);
     if (s.signedIn && !s.busy && s.toolInstalled)
         refreshGog();
@@ -683,13 +581,6 @@ void StoreManager::install(const QString &key, const QString &appId, const QStri
     GameLibrary *library = GameLibrary::instance();
     if (library->isInstalled(id))
         return;
-    if (key == QLatin1String("steam")) {
-        if (!m_steam->signedIn())
-            return;
-        library->addPending(key, appId, title);
-        m_steam->install(appId, title);
-        return;
-    }
     if (!store(key).signedIn)
         return;
     if (Download *existing = findDownload(id)) {
@@ -812,12 +703,6 @@ void StoreManager::finishDownload(bool ok, const QString &message)
 
 void StoreManager::cancel(const QString &gameId)
 {
-    if (gameId.startsWith(QLatin1String("steam:"))) {
-        m_steam->cancel(gameId.mid(6));
-        if (!GameLibrary::instance()->isInstalled(gameId))
-            GameLibrary::instance()->removeRecord(gameId);
-        return;
-    }
     if (gameId == m_activeDownload && m_activeProcess) {
         if (Download *d = findDownload(gameId))
             d->status = QStringLiteral("cancelled");   // finishDownload уберёт её из списка
@@ -857,15 +742,6 @@ void StoreManager::uninstall(const QString &gameId)
     const QVariantMap game = library->game(gameId);
     if (game.isEmpty())
         return;
-    if (gameId.startsWith(QLatin1String("steam:"))) {
-        // Игры Steam удаляет клиент Steam (через свою библиотеку)
-        if (game.value(QStringLiteral("installed")).toBool())
-            m_steam->uninstall(gameId.mid(6));
-        else
-            m_steam->cancel(gameId.mid(6));
-        library->removeRecord(gameId);
-        return;
-    }
     // Загружается — сначала останавливаем загрузку
     if (findDownload(gameId)) {
         cancel(gameId);
@@ -911,37 +787,17 @@ QVariantMap StoreManager::compatibility(const QString &key, const QString &appId
         return {{QStringLiteral("checked"), false}};
     m_compatPending.insert(id);
 
-    // Steam — категории и controller_support из магазина Steam (английские названия категорий),
     // GOG — список возможностей игры
-    const QUrl url = key == QLatin1String("steam")
-            ? QUrl(QStringLiteral("https://store.steampowered.com/api/appdetails?appids=%1&l=english").arg(appId))
-            : QUrl(QStringLiteral("https://api.gog.com/v2/games/%1?locale=en-US").arg(appId));
+    const QUrl url(QStringLiteral("https://api.gog.com/v2/games/%1?locale=en-US").arg(appId));
     QNetworkReply *reply = m_network->get(request(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, key, appId, id] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id] {
         reply->deleteLater();
         m_compatPending.remove(id);
         const QJsonObject root = QJsonDocument::fromJson(reply->readAll()).object();
         QVariantMap info{{QStringLiteral("checked"), true}};
         bool ok = reply->error() == QNetworkReply::NoError;
         bool controller = false, ps5 = false, ps4 = false;
-        if (ok && key == QLatin1String("steam")) {
-            const QJsonObject entry = root.value(appId).toObject();
-            ok = entry.value(QStringLiteral("success")).toBool();
-            const QJsonObject data = entry.value(QStringLiteral("data")).toObject();
-            controller = !data.value(QStringLiteral("controller_support")).toString().isEmpty();
-            for (const QJsonValue &value : data.value(QStringLiteral("categories")).toArray()) {
-                const QString name = value.toObject().value(QStringLiteral("description")).toString().toLower();
-                // «Tracked Controller Support» — контроллеры VR, не геймпад
-                if (name.contains(QLatin1String("tracked")))
-                    continue;
-                if (name.contains(QLatin1String("controller")))
-                    controller = true;
-                if (name.contains(QLatin1String("ps5")) || name.contains(QLatin1String("dualsense")))
-                    ps5 = true;
-                if (name.contains(QLatin1String("ps4")) || name.contains(QLatin1String("dualshock")))
-                    ps4 = true;
-            }
-        } else if (ok) {
+        if (ok) {
             for (const QJsonValue &value : root.value(QStringLiteral("_embedded")).toObject().value(QStringLiteral("features")).toArray()) {
                 if (value.toObject().value(QStringLiteral("name")).toString().contains(QLatin1String("controller"), Qt::CaseInsensitive))
                     controller = true;

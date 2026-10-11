@@ -303,7 +303,9 @@ void GameLibrary::load()
             g.installedAt = qint64(o.value(QStringLiteral("installedAt")).toDouble());
             // Незавершённая загрузка (оболочку перезапустили) или папку игры удалили вручную —
             // запись больше не нужна
-            if (!g.store.isEmpty() && !g.appId.isEmpty() && g.installed && QFileInfo::exists(g.installPath))
+            // Игр Steam оболочка больше не ведёт (их ставил клиент Steam) — записи пропускаем
+            if (!g.store.isEmpty() && !g.appId.isEmpty() && g.installed && QFileInfo::exists(g.installPath)
+                && g.store != QLatin1String("steam"))
                 m_games.append(g);
         }
     }

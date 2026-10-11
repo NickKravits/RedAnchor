@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — установка RedAnchor Shell и всех зависимостей одной командой (Ubuntu 24.04+, Debian 12+).
 #
-#   ./install.sh              всё: пакеты, Steam, драйверы, Qt ≥ 6.10, сборка и установка оболочки
+#   ./install.sh              всё: пакеты, драйверы, Qt ≥ 6.10, сборка и установка оболочки
 #   ./install.sh --deps-only  только системные пакеты (без Qt из aqtinstall и без сборки)
 #   ./install.sh --no-build   пакеты и Qt, но без сборки и установки оболочки
 #   ./install.sh --yes        не задавать вопросов (на всё отвечать «да»)
@@ -203,7 +203,7 @@ check_system() {
     command -v apt-get >/dev/null 2>&1 || fail "Нужна система на базе Ubuntu или Debian (apt)."
     command -v sudo >/dev/null 2>&1 || fail "Не найден sudo. Установите его: su -c 'apt install sudo' и добавьте себя в группу sudo."
     [[ -f $HELPER ]] || fail "Не найден $HELPER — запускайте install.sh из каталога исходников."
-    [[ $(uname -m) == x86_64 ]] || warn "Архитектура $(uname -m): Steam и Proton работают только на x86_64."
+    [[ $(uname -m) == x86_64 ]] || warn "Архитектура $(uname -m): Proton работает только на x86_64."
 
     # shellcheck disable=SC1091
     . /etc/os-release
@@ -229,7 +229,7 @@ check_system() {
 prepare_apt() {
     step "Подготовка apt: 32-битные пакеты, прерванные установки"
     if ! dpkg --print-foreign-architectures | grep -qx i386; then
-        info "включаем архитектуру i386 (нужна Steam и Proton)"
+        info "включаем архитектуру i386 (нужна Proton и 32-битным играм)"
         sudo dpkg --add-architecture i386
     fi
     sudo dpkg --configure -a >>"$LOG" 2>&1 || warn "dpkg --configure -a завершился с ошибкой"
@@ -726,7 +726,6 @@ summary() {
   Дальше:
     1. Выйдите из системы и на экране входа выберите сеанс «RedAnchor» (шестерёнка внизу).
     2. В мастере настройки на шаге «Проверка обновлений» оболочка докачает Proton и gogdl.
-    3. Steam: войдите один раз в Big Picture — дальше клиент обновляется сам.
 
   Журнал установки: $LOG
   Журнал сессии:    ~/.local/state/redanchor/session.log
@@ -765,9 +764,9 @@ echo "==== install.sh $(date '+%F %T') $*" >>"$LOG"
 trap cleanup EXIT
 
 # Шаги: система, apt, сборка, библиотеки Qt, 4 цели помощника, Qt, [сборка, установка], права
-STEPS_TOTAL=10
+STEPS_TOTAL=9
 if [[ $DEPS_ONLY -eq 0 && $NO_BUILD -eq 0 ]]; then
-    STEPS_TOTAL=12
+    STEPS_TOTAL=11
 fi
 
 printf '%sRedAnchor Shell — установка%s\n' "$C_BOLD" "$C_RESET"
@@ -777,10 +776,9 @@ check_system
 prepare_apt
 install_build_deps
 install_qt_runtime_libs
-helper_step system "Компоненты сессии: gamescope, Xwayland, Python 3, PipeWire, шрифт Inter" required
+helper_step system "Компоненты сессии: gamescope, Xwayland, Python 3, PipeWire, шрифт Inter, правила для геймпадов" required
 helper_step drivers "Графический драйвер (NVIDIA или Mesa, 64 и 32 бита)"
 helper_step vulkan "Vulkan (64 и 32 бита)"
-helper_step steam "Steam — официальный клиент, steam-devices, 32-битные библиотеки"
 ensure_qt
 if [[ $DEPS_ONLY -eq 0 && $NO_BUILD -eq 0 ]]; then
     build_shell

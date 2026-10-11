@@ -18,35 +18,28 @@ class QJSEngine;
 class QNetworkAccessManager;
 class QProcess;
 class QQmlEngine;
-class SteamClient;
 
-// Магазины игр: Steam (официальный клиент, SteamClient) и GOG (gogdl).
+// Магазины игр: GOG (gogdl).
 //
 // Инструмент GOG общий для всех пользователей, лежит в ~/.local/share/RedAnchor/RedAnchor Shell/tools,
-// его и клиент Steam ставит ComponentsManager («Настройки → Обновления»).
+// его ставит ComponentsManager («Настройки → Обновления»).
 // Всё остальное своё у каждого пользователя консоли (папка профиля):
-//   stores/<магазин>/  — вход в магазин, кэш списка игр (Steam — ещё и HOME клиента Steam);
-//   games/gog/         — установленные игры GOG; игры Steam — в библиотеке клиента
-//                         (~/.local/share/redanchor/steam/<id>/.steam/…/steamapps).
+//   stores/<магазин>/  — вход в магазин, кэш списка игр;
+//   games/<магазин>/   — установленные игры.
 //
-// Steam: вход один раз в Steam Big Picture (поверх оболочки, как игра), дальше клиент работает
-// в фоне; библиотека, установка и запуск — через него (подробности — в steamclient.h).
 // GOG: вход через страницу входа во встроенном браузере (WebLoginWindow.qml передаёт код).
 //
 // Поставленная на загрузку игра сразу появляется в библиотеке (GameLibrary::addPending).
-// Загрузки GOG идут по очереди, по одной игре; загрузки Steam — в очереди клиента Steam.
+// Загрузки идут по очереди, по одной игре.
 class StoreManager : public QObject
 {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
 
-    // { steam|gog: { toolInstalled (Steam — клиент установлен), signedIn, account (Steam — имя
-    //                профиля), avatar (URL), busy, message, listTitle,
-    //                Steam ещё: phase ("" | starting | signin | stopping),
-    //                phaseProgress (0..1 | -1), online } }
+    // { gog: { toolInstalled, signedIn, account, avatar (URL), busy, message, listTitle } }
     Q_PROPERTY(QVariantMap stores READ stores NOTIFY storesChanged)
-    // { steam|gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | failed), progress }] }
+    // { gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | failed), progress }] }
     Q_PROPERTY(QVariantMap owned READ owned NOTIFY ownedChanged)
     // [{ id, store, appId, title, status, progress, message }]
     Q_PROPERTY(QVariantList downloads READ downloads NOTIFY downloadsChanged)
@@ -74,10 +67,6 @@ public:
     Q_INVOKABLE QString loginUrl(const QString &store) const;
     // Код авторизации со страницы входа
     Q_INVOKABLE void completeWebLogin(const QString &store, const QString &code);
-    // Вход в Steam: Big Picture поверх оболочки, закрывается сам после входа.
-    // Это единственный раз, когда Steam виден, — дальше он работает молча в фоне
-    Q_INVOKABLE void steamSignIn();
-    Q_INVOKABLE void cancelSteamSignIn();
     Q_INVOKABLE void signOut(const QString &store);
     // Обновить список купленных игр
     Q_INVOKABLE void refresh(const QString &store);
@@ -90,8 +79,6 @@ public:
     // Пока сведений нет — запрашивает их; по готовности придёт compatibilityChanged(gameId).
     Q_INVOKABLE QVariantMap compatibility(const QString &store, const QString &appId);
 
-    // Клиент Steam (запуск игр Steam — GameLauncher)
-    SteamClient *steam() const { return m_steam; }
     // Пути для запуска игр GOG
     QString gogdlExecutable() const { return gogdlPath(); }
     QString gogAuthConfig() const { return gogAuthFile(); }
@@ -157,7 +144,6 @@ private:
     void downloadFile(const QUrl &url, const QString &path, std::function<void(double)> onProgress,
                       std::function<void(bool ok, const QString &error)> onDone);
     void gogToken(std::function<void(const QString &token)> onToken);
-    void syncSteamLibrary();
 
     void reload();
     void loadOwned(const QString &key);
@@ -175,7 +161,6 @@ private:
     QList<Download> m_downloads;
     QProcess *m_activeProcess = nullptr;
     QString m_activeDownload;
-    SteamClient *m_steam = nullptr;
     QNetworkAccessManager *m_network = nullptr;
     QHash<QString, QVariantMap> m_compat;   // gameId -> поддержка геймпада
     QSet<QString> m_compatPending;

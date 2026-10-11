@@ -18,10 +18,10 @@
     <annotate key="org.freedesktop.policykit.exec.path">@PAIR_HELPER_PATH@</annotate>
   </action>
   <!-- Установка системных компонентов из настроек и мастера настройки: пакеты сессии (gamescope…),
-       драйверы, Vulkan, клиент Steam. Помощник принимает только фиксированные цели. -->
+       драйверы, Vulkan. Помощник принимает только фиксированные цели. -->
   <action id="org.redanchor.shell.components">
-    <description>Install system components for games (drivers, Vulkan, Steam, gamescope)</description>
-    <description xml:lang="ru">Установка системных компонентов для игр (драйверы, Vulkan, Steam, gamescope)</description>
+    <description>Install system components for games (drivers, Vulkan, gamescope)</description>
+    <description xml:lang="ru">Установка системных компонентов для игр (драйверы, Vulkan, gamescope)</description>
     <message>Authentication is required to install system components</message>
     <message xml:lang="ru">Для установки системных компонентов требуется аутентификация</message>
     <defaults>

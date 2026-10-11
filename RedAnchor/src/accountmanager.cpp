@@ -1,5 +1,4 @@
 #include "accountmanager.h"
-#include "steamclient.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -137,10 +136,6 @@ bool AccountManager::removeAccount(const QString &id)
     const QString dir = profileDirFor(id);
     if (!dir.isEmpty() && !QDir(dir).removeRecursively())
         qWarning("Failed to remove profile directory %s", qPrintable(dir));
-    // Клиент Steam и его игры лежат вне профиля
-    const QString steamHome = SteamClient::homePath(dir);
-    if (!steamHome.isEmpty() && QFileInfo::exists(steamHome) && !QDir(steamHome).removeRecursively())
-        qWarning("Failed to remove Steam home %s", qPrintable(steamHome));
     m_accounts.removeAt(index);
     m_current = indexOf(currentId);
     if (m_lastId == id)

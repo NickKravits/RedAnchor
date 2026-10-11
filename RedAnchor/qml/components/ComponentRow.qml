@@ -1,6 +1,6 @@
 import QtQuick
 
-// Строка компонента (системные пакеты, драйвер, Vulkan, Steam, Proton, gogdl) для списков
+// Строка компонента (системные пакеты, драйвер, Vulkan, Proton, gogdl) для списков
 // с моделью ComponentsManager.components: название, состояние, прогресс установки.
 // ✕ — установить или обновить, если это нужно.
 ConsoleListItem {
@@ -23,7 +23,6 @@ ConsoleListItem {
         case "system": return "apps"
         case "drivers": return "chip"
         case "vulkan": return "vulkan"
-        case "steam": return "controller"
         case "proton": return "proton"
         default: return "store"
         }
@@ -38,8 +37,7 @@ ConsoleListItem {
             return (recommended ? qsTr("Не установлено") : qsTr("Не установлено, необязательно")) + " · " + description
         case "installed":
             return qsTr("Установлено") + (version !== "" ? " · " + version : "")
-                   + (message !== "" ? " · " + message
-                      : key === "steam" ? " · " + qsTr("обновляется сам") : "")
+                   + (message !== "" ? " · " + message : "")
         case "update": return qsTr("Доступно обновление: %1").arg(latest) + (version !== "" ? qsTr(" (сейчас %1)").arg(version) : "")
         case "queued": return qsTr("В очереди")
         case "installing": return message !== "" ? message : qsTr("Установка…")

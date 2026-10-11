@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 
-// Вкладка «Магазин»: разделы RedStore, Steam, GOG.
+// Вкладка «Магазин»: разделы RedStore, GOG.
 // Фокус сначала попадает на панель разделов: ←/→ (или L2 / R2 откуда угодно) — магазин,
 // ↓ или ✕ — внутрь раздела, ↑ или ○ из раздела — обратно к панели разделов.
 FocusScope {
@@ -13,7 +13,6 @@ FocusScope {
     property int section: 0
     readonly property var sections: [
         { key: "redstore", title: "RedStore" },
-        { key: "steam", title: "Steam" },
         { key: "gog", title: "GOG" }
     ]
 

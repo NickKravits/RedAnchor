@@ -87,8 +87,8 @@ Window {
         interval: Theme.animNormal
         onTriggered: {
             overlay.hide()
-            // Игры и Steam поверх нет — возвращаем управление оболочке
-            if (GameLauncher.state !== "running" && !overlay.steamShown && overlay.mainWindow)
+            // Игры поверх нет — возвращаем управление оболочке
+            if (GameLauncher.state !== "running" && overlay.mainWindow)
                 overlay.mainWindow.requestActivate()
         }
     }
@@ -105,14 +105,10 @@ Window {
         overlay.artRevision
         return gameRunning && game && game.id ? GameArt.art(game.id, game.store, game.appId, game.title) : ({})
     }
-    readonly property string steamPhase: (StoreManager.stores.steam || {}).phase || ""
-    readonly property bool steamShown: steamPhase === "signin"
     readonly property var items: {
         const list = []
         if (gameRunning && game)
             list.push({ key: "game", title: game.title || qsTr("Игра") })
-        if (steamShown)
-            list.push({ key: "steam", title: qsTr("Steam") })
         list.push({ key: "sound", title: SystemControl.volume >= 0
                                          ? qsTr("Звук: %1%").arg(SystemControl.muted ? 0 : SystemControl.volume)
                                          : qsTr("Звук") })
@@ -189,7 +185,6 @@ Window {
                 anchors.margins: Theme.px(24)
                 sourceComponent: content.panel === "sound" ? soundPanel
                                  : content.panel === "game" ? gamePanel
-                                 : content.panel === "steam" ? steamPanel
                                  : content.panel === "power" ? powerPanel : null
                 onLoaded: item.forceActiveFocus()
             }
@@ -282,7 +277,6 @@ Window {
                                 size: Theme.px(40)
                                 lineWidth: 1.5
                                 name: tile.modelData.key === "game" ? "play"
-                                    : tile.modelData.key === "steam" ? "steam"
                                     : tile.modelData.key === "sound" ? (SystemControl.muted || SystemControl.volume === 0 ? "volumeMute" : "volume")
                                     : "power"
                             }
@@ -312,15 +306,6 @@ Window {
             actions: [
                 { text: qsTr("Закрыть игру"), icon: "close", run: () => { overlay.close(); GameLauncher.stop() } },
                 { text: qsTr("Перезапустить игру"), icon: "refresh", run: () => { overlay.close(); GameLauncher.restart() } }
-            ]
-        }
-    }
-    Component {
-        id: steamPanel
-        ActionList {
-            actions: [
-                { text: qsTr("Отменить вход в Steam"), icon: "close",
-                  run: () => { overlay.close(); StoreManager.cancelSteamSignIn() } }
             ]
         }
     }

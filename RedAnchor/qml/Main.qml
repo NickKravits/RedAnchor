@@ -356,21 +356,13 @@ ApplicationWindow {
         anchors.fill: parent
         z: 30
     }
-    // Steam Big Picture поверх оболочки — только на время входа в Steam
-    SteamScreen {
-        id: steamScreen
-        anchors.fill: parent
-        z: 29
-    }
-    readonly property string steamPhase: (StoreManager.stores.steam || {}).phase || ""
-    readonly property bool steamShown: steamPhase === "signin"
-    // Пока идёт игра или открыт Steam, геймпад не должен управлять оболочкой в фоне
+    // Пока идёт игра, геймпад не должен управлять оболочкой в фоне
     // (кроме оверлея по PS)
     Binding {
         target: GamepadManager
         property: "keyEventsEnabled"
         value: false
-        when: (GameLauncher.state === "running" || window.steamShown) && !systemOverlay.opened
+        when: GameLauncher.state === "running" && !systemOverlay.opened
     }
 
     // ---------- Фокус ----------

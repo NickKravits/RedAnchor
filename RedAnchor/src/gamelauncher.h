@@ -12,8 +12,6 @@ class QProcess;
 class QTimer;
 
 // Запуск установленных игр.
-//   Steam — через клиент Steam (steam -applaunch): Proton, среда выполнения, защита от
-//           копирования, облачные сохранения и сетевая игра — как в обычном Steam;
 //   GOG   — gogdl launch с GE-Proton («Настройки → Обновления») в качестве обёртки.
 //           У каждой игры GOG свой префикс Wine в профиле пользователя:
 //           profiles/<id>/prefixes/gog_<appId>, вывод игры — в profiles/<id>/logs/gog_<appId>.log.
@@ -62,12 +60,9 @@ private:
     void setState(const QString &state, const QString &message = QString());
     QString protonPath() const;
     void start(const QString &program, const QStringList &args, const QString &workingDir);
-    void launchSteam(const QString &appId);
     void startWatch();
-    // Процессы самой игры: Steam — reaper и всё с SteamAppId игры; GOG — файлы из папки игры
-    // и всё, что запущено в её префиксе Wine
+    // Процессы самой игры: файлы из папки игры и всё, что запущено в её префиксе Wine
     QList<qint64> gamePids() const;
-    bool isSteam() const;
     void checkStarted();
     void fail(const QString &message);
     void killGame();

@@ -23,11 +23,10 @@ class QProcess;
 //               (на нём написан Proton), PipeWire (громкость), шрифт Inter;
 //   "drivers" — графический драйвер: NVIDIA или Mesa (AMD, Intel), 64 и 32 бита;
 //   "vulkan"  — загрузчик Vulkan и драйверы Mesa Vulkan, 64 и 32 бита;
-//   "steam"   — официальный клиент Steam (обновляется сам, состояния «update» у него нет);
 //   "proton"  — GE-Proton (последний выпуск с GitHub) для Windows-игр из GOG;
 //   "gogdl"   — загрузчик игр GOG (последний выпуск с GitHub,
 //               в ~/.local/share/RedAnchor/RedAnchor Shell/tools — оттуда его берёт StoreManager).
-// Системные пакеты (system, drivers, vulkan, steam) ставит помощник redanchor-components
+// Системные пакеты (system, drivers, vulkan) ставит помощник redanchor-components
 // (apt, от root через pkexec). Proton скачивается в
 // ~/.local/share/RedAnchor/RedAnchor Shell/compatibilitytools без прав root.
 // Установка идёт по очереди, по одному компоненту.
@@ -54,9 +53,6 @@ class ComponentsManager : public QObject
     Q_PROPERTY(QString gpuVendor READ gpuVendor CONSTANT)
     // Каталог установленного Proton (пусто, если не установлен)
     Q_PROPERTY(QString protonPath READ protonPath NOTIFY componentsChanged)
-    // Исполняемый файл клиента Steam (пусто, если Steam не установлен)
-    Q_PROPERTY(QString steamPath READ steamPath NOTIFY componentsChanged)
-    Q_PROPERTY(bool steamInstalled READ steamInstalled NOTIFY componentsChanged)
 
 public:
     explicit ComponentsManager(QObject *parent = nullptr);
@@ -68,19 +64,13 @@ public:
     bool rebootRequired() const { return m_rebootRequired; }
     QString gpuVendor() const { return m_gpuVendor; }
     QString protonPath() const;
-    QString steamPath() const { return steamExecutable(); }
-    bool steamInstalled() const { return !steamExecutable().isEmpty(); }
-
-    // Клиент Steam: из PATH, иначе /usr/games/steam или /usr/bin/steam (у экрана входа
-    // в PATH может не быть /usr/games)
-    static QString steamExecutable();
 
     // Проверить, что установлено, и узнать последние версии Proton и gogdl.
     Q_INVOKABLE void check();
     // Поставить компонент в очередь установки.
     Q_INVOKABLE void install(const QString &key);
     // Установить всё отсутствующее и обновить устаревшее
-    // (по порядку: system → drivers → vulkan → steam → proton → gogdl).
+    // (по порядку: system → drivers → vulkan → proton → gogdl).
     Q_INVOKABLE void installAll();
 
 signals:
