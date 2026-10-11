@@ -411,30 +411,58 @@ ensure_qt() {
     fail "Qt $QT_VERSION установлен в $QT_INSTALL_DIR/$QT_VERSION, но в нём не хватает модулей: ${QT_MISSING:-неизвестно}. Подробности — в $LOG"
 }
 
+# Зеркала Qt: основной сервер часто отдаёт файлы медленно или без контрольных сумм
+read -r -a AQT_MIRRORS <<<"${AQT_MIRRORS:-https://download.qt.io https://qt.mirror.constant.com https://mirrors.ocf.berkeley.edu/qt https://ftp.fau.de/qtproject}"
+AQT_ERROR=""
+
+# aqt_install <сборка> [аргументы…] — ставит Qt $QT_VERSION, пробуя зеркала по очереди.
+# При неудаче в AQT_ERROR — последняя строка ERROR из вывода aqt
+aqt_install() {
+    local arch=$1 base out
+    shift
+    for base in "${AQT_MIRRORS[@]}"; do
+        echo "aqt install-qt $QT_VERSION $arch $* (зеркало $base)" >>"$LOG"
+        if out=$("$AQT_VENV/bin/aqt" install-qt linux desktop "$QT_VERSION" "$arch" \
+                 -O "$QT_INSTALL_DIR" -b "$base" --timeout 30 "$@" 2>&1); then
+            echo "$out" >>"$LOG"
+            return 0
+        fi
+        echo "$out" >>"$LOG"
+        AQT_ERROR=$(grep -E 'ERROR' <<<"$out" | tail -1 | sed -E 's/^ERROR *: *//' || true)
+        [[ -n $AQT_ERROR ]] || AQT_ERROR=$(tail -1 <<<"$out")
+        # Нет такой версии или модуля — другие зеркала не помогут
+        if grep -qiE 'not (a valid|found|available)|invalid version|no qt version|unknown' <<<"$AQT_ERROR"; then
+            return 1
+        fi
+        warn "зеркало $base не ответило: $AQT_ERROR — пробую следующее"
+    done
+    return 1
+}
+
 install_qt_aqt() {
     info "подготовка aqtinstall ($AQT_VENV)"
     if [[ ! -x $AQT_VENV/bin/python3 ]]; then
         python3 -m venv "$AQT_VENV" >>"$LOG" 2>&1 || fail "Не удалось создать окружение Python (нужен пакет python3-venv)."
     fi
     "$AQT_VENV/bin/python3" -m pip install -q -U pip aqtinstall >>"$LOG" 2>&1 || fail "Не удалось установить aqtinstall (pip)."
-    local aqt="$AQT_VENV/bin/aqt"
+    [[ $QT_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+        fail "QT_VERSION должна быть полной версией вида 6.10.1 (сейчас: «$QT_VERSION»)."
 
-    # Имя сборки: linux_gcc_64 (Qt 6.7+) или gcc_64 (старые)
-    local arches arch=""
-    arches=$("$aqt" list-qt linux desktop --arch "$QT_VERSION" 2>>"$LOG") ||
-        fail "aqtinstall не знает Qt $QT_VERSION. Укажите другую версию: QT_VERSION=6.10.1 ./install.sh"
-    for a in linux_gcc_64 gcc_64; do
-        if [[ " $arches " == *" $a "* ]]; then arch=$a; break; fi
-    done
-    [[ -n $arch ]] || fail "Нет сборки Qt $QT_VERSION для linux x86_64 (есть: $arches)."
+    # Имя сборки берём по версии, без «aqt list-qt»: тот не умеет другие зеркала и при любом
+    # сбое сети выглядел как «версия неизвестна». Qt 6.7+ — linux_gcc_64, старые — gcc_64
+    local arch=gcc_64 minor
+    minor=$(cut -d. -f2 <<<"$QT_VERSION")
+    if [[ ${QT_VERSION%%.*} -gt 6 || ( ${QT_VERSION%%.*} -eq 6 && $minor -ge 7 ) ]]; then
+        arch=linux_gcc_64
+    fi
 
     mkdir -p "$QT_INSTALL_DIR"
     # Базовый Qt (если его ещё нет) — повторная установка поверх просто ничего не меняет
     if [[ ! -f $QT_INSTALL_DIR/$QT_VERSION/gcc_64/lib/cmake/Qt6/Qt6ConfigVersion.cmake &&
           ! -f $QT_INSTALL_DIR/$QT_VERSION/linux_gcc_64/lib/cmake/Qt6/Qt6ConfigVersion.cmake ]]; then
         info "загрузка Qt $QT_VERSION ($arch) — это займёт время"
-        "$aqt" install-qt linux desktop "$QT_VERSION" "$arch" -O "$QT_INSTALL_DIR" >>"$LOG" 2>&1 ||
-            fail "aqtinstall не смог установить Qt $QT_VERSION."
+        aqt_install "$arch" ||
+            fail "aqtinstall не смог установить Qt $QT_VERSION: $AQT_ERROR. Подробности — в $LOG"
     fi
     # Модули — каждый отдельно: WebEngine с Qt 6.8 лежит среди «расширений» и в списке
     # модулей aqt может не показываться, но ставится так же. Один неудачный модуль
@@ -442,11 +470,10 @@ install_qt_aqt() {
     local m failed=()
     for m in "${AQT_MODULES[@]}"; do
         info "модуль $m"
-        "$aqt" install-qt linux desktop "$QT_VERSION" "$arch" -O "$QT_INSTALL_DIR" -m "$m" >>"$LOG" 2>&1 ||
-            failed+=("$m")
+        aqt_install "$arch" -m "$m" || failed+=("$m ($AQT_ERROR)")
     done
     if [[ ${#failed[@]} -gt 0 ]]; then
-        warn "aqtinstall не смог поставить: ${failed[*]} (подробности — в журнале)"
+        warn "aqtinstall не смог поставить: ${failed[*]}"
     fi
     ok "Qt $QT_VERSION: $QT_INSTALL_DIR/$QT_VERSION"
 }
