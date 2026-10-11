@@ -7,7 +7,8 @@
 #                                    Xwayland, libxcb-cursor0 (Qt внутри gamescope), Python 3
 #                                    (на нём написан Proton), PipeWire/WirePlumber (громкость),
 #                                    шрифт Inter, BlueZ, NetworkManager, правила udev для
-#                                    геймпадов (steam-devices)
+#                                    геймпадов (steam-devices), профиль AppArmor для bwrap
+#                                    (контейнер Steam Runtime у umu-launcher, Ubuntu 24.04+)
 #   redanchor-components drivers   — графический драйвер: NVIDIA (ubuntu-drivers / nvidia-driver)
 #                                    или Mesa для AMD и Intel (64 и 32 бита) с прошивками
 #   redanchor-components vulkan    — загрузчик Vulkan и драйверы Mesa Vulkan (64 и 32 бита)
@@ -259,6 +260,26 @@ prepare() {
     ensure_i386
 }
 
+# umu-launcher запускает игры в контейнере Steam Runtime (bwrap). В Ubuntu 24.04+ AppArmor
+# запрещает непривилегированные пространства имён пользователей — как пакет umu для Ubuntu,
+# включаем профиль bwrap-userns-restrict из apparmor-profiles (разрешает их только /usr/bin/bwrap)
+setup_umu_apparmor() {
+    local restrict=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+    [[ -r $restrict && $(cat "$restrict") == 1 ]] || return 0
+    [[ -e /etc/apparmor.d/bwrap-userns-restrict || -e /etc/apparmor.d/bwrap-userns-restrict-umu ]] && return 0
+    apt_install_optional bubblewrap apparmor-profiles
+    local profile=/usr/share/apparmor/extra-profiles/bwrap-userns-restrict
+    if [[ ! -f $profile ]]; then
+        log "нет профиля AppArmor $profile — игры через umu могут не запуститься"
+        return 0
+    fi
+    ln -sf "$profile" /etc/apparmor.d/bwrap-userns-restrict-umu
+    if command -v apparmor_parser >/dev/null 2>&1; then
+        apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict-umu >&2 ||
+            log "не удалось загрузить профиль AppArmor для bwrap"
+    fi
+}
+
 # ---------- Цели ----------
 
 install_system() {
@@ -285,6 +306,7 @@ install_system() {
         udevadm control --reload >&2 || true
         udevadm trigger --subsystem-match=hidraw --subsystem-match=input --subsystem-match=misc >&2 || true
     fi
+    setup_umu_apparmor
     if ! command -v gamescope >/dev/null 2>&1 && [[ ! -x /usr/games/gamescope ]]; then
         log "gamescope недоступен в репозиториях этой системы — сессия запустится в Weston (или cage)"
     fi

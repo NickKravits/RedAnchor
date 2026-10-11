@@ -3,7 +3,8 @@ import QtQuick
 import "ModelSync.js" as ModelSync
 
 // Настройки → Обновления: состояние и установка компонентов для игр —
-// системные пакеты сессии, графический драйвер, Vulkan, Proton и gogdl.
+// системные пакеты сессии, графический драйвер, Vulkan, Proton, umu-launcher (запуск игр),
+// загрузчики игр gogdl (GOG) и legendary (Epic Games Store).
 FocusScope {
     id: root
 

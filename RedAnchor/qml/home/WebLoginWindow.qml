@@ -1,24 +1,27 @@
 import QtQuick
 import QtWebEngine
 
-// Отдельное большое окно встроенного браузера для входа в GOG
+// Отдельное большое окно встроенного браузера для входа в магазин (GOG, Epic Games)
 // (на консоли — во весь экран). Управление геймпадом:
 //   крестовина — переход между элементами страницы, ✕ — нажать (на поле ввода —
 //   экранная клавиатура), △ — отправить форму, ○ — отменить вход,
 //   L1 / R1 — прокрутка, правый стик — курсор (только в этом окне), ✕ или R3 — щелчок курсором;
 //   щелчок курсором по полю ввода открывает экранную клавиатуру.
-// Код авторизации перехватывается автоматически и передаётся в StoreManager.
+// Код авторизации перехватывается автоматически и передаётся в StoreManager:
+//   GOG  — из адреса перенаправления embed.gog.com/on_login_success?code=…;
+//   Epic — со страницы www.epicgames.com/id/api/redirect: она отдаёт JSON с authorizationCode
+//          (так входят legendary и Heroic).
 // Браузер приватный: куки и вход не сохраняются и не смешиваются между пользователями.
 Window {
     id: win
 
-    property string store                 // "gog"
+    property string store                 // "gog" | "epic"
     property bool fullscreen: false
     property bool done: false
 
     signal finished()
 
-    readonly property string storeTitle: "GOG"
+    readonly property string storeTitle: store === "epic" ? "Epic Games" : "GOG"
 
     title: qsTr("Вход в %1").arg(storeTitle)
     color: Theme.background
@@ -135,6 +138,21 @@ Window {
             if (match)
                 finishWithCode(decodeURIComponent(match[1]))
         }
+    }
+
+    // Epic: код — в JSON на странице перенаправления (её текст читаем после загрузки)
+    function checkPage(url) {
+        if (store !== "epic" || !url.toString().startsWith("https://www.epicgames.com/id/api/redirect"))
+            return
+        view.runJavaScript("document.body ? document.body.innerText : ''", function (text) {
+            try {
+                const code = JSON.parse(text).authorizationCode
+                if (code)
+                    win.finishWithCode(code)
+            } catch (e) {
+                console.warn("Epic login: no JSON on the redirect page")
+            }
+        })
     }
 
     function openKeyboard(info) {
@@ -279,6 +297,7 @@ Window {
             onLoadingChanged: (request) => {
                 if (request.status === WebEngineView.LoadSucceededStatus) {
                     runJavaScript(win.helperScript)
+                    win.checkPage(request.url)
                 }
             }
 

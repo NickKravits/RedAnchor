@@ -8,15 +8,24 @@
 #include <QVariantMap>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
+
+class QNetworkAccessManager;
 class QProcess;
 class QTimer;
 
-// Запуск установленных игр.
-//   GOG   — gogdl launch с GE-Proton («Настройки → Обновления») в качестве обёртки.
-//           У каждой игры GOG свой префикс Wine в профиле пользователя:
-//           profiles/<id>/prefixes/gog_<appId>, вывод игры — в profiles/<id>/logs/gog_<appId>.log.
+// Запуск установленных игр через загрузчик магазина, обёртка — umu-launcher (umu-run):
+//   GOG   — gogdl launch … --no-wine --wrapper umu-run;
+//   Epic  — legendary launch … --no-wine --wrapper umu-run: legendary сам добавляет к игре
+//           параметры входа Epic (-AUTH_PASSWORD … — Epic Online Services, игра по сети).
+// umu-run запускает GE-Proton («Настройки → Обновления», PROTONPATH) в контейнере Steam Runtime
+// и применяет исправления для конкретной игры (protonfixes) по её id в базе umu (GAMEID, STORE).
+// Так же запускает игры Heroic Games Launcher. Без umu-launcher — запасной путь: GE-Proton
+// напрямую (proton waitforexitandrun), как раньше; на экране запуска — подсказка поставить umu.
+// У каждой игры свой префикс Wine в профиле пользователя: profiles/<id>/prefixes/<магазин>_<appId>,
+// вывод игры — в profiles/<id>/logs/<магазин>_<appId>.log.
 // Игра считается идущей, пока живы её процессы (а не только запустивший её процесс:
-// лаунчеры часто запускают игру и сразу выходят).
+// лаунчеры часто запускают игру и сразу выходят, legendary — всегда).
 class GameLauncher : public QObject
 {
     Q_OBJECT
@@ -59,10 +68,22 @@ public:
 private:
     void setState(const QString &state, const QString &message = QString());
     QString protonPath() const;
-    void start(const QString &program, const QStringList &args, const QString &workingDir);
+    static QString umuPath();
+    // Идентификатор игры в базе umu (как у Heroic); пустая строка — игры там нет
+    void lookupUmuId(const QString &store, const QString &appId, std::function<void(const QString &umuId)> onReady);
+    void startGame(const QString &umuId);
+    void start(const QString &program, const QStringList &args, const QString &workingDir, const QString &umuId);
     void startWatch();
-    // Процессы самой игры: файлы из папки игры и всё, что запущено в её префиксе Wine
-    QList<qint64> gamePids() const;
+    struct Processes {
+        QList<qint64> game;       // процессы самой игры
+        QList<qint64> launcher;   // всё, что запущено этим запуском (umu-run, Proton, игра…)
+    };
+    // Процессы самой игры: файлы из папки игры и всё, что запущено в её префиксе Wine;
+    // процессы запуска — по метке REDANCHOR_LAUNCH в окружении
+    Processes scanProcesses() const;
+    QList<qint64> gamePids() const { return scanProcesses().game; }
+    // Понятная причина неудачного запуска по журналу игры
+    QString failureReason(const QString &fallback) const;
     void checkStarted();
     void fail(const QString &message);
     void killGame();
@@ -83,10 +104,14 @@ private:
     QString m_relaunch;     // id игры, которую запустить после закрытия (перезапуск)
     QString m_inputMode;
     QProcess *m_process = nullptr;
-    bool m_processDone = false;     // процесс запуска (Proton, gogdl) уже вышел
+    bool m_processDone = false;     // процесс запуска (gogdl, legendary) уже вышел
     qint64 m_lastSeen = 0;          // мс от m_started, когда процессы игры видели последний раз
-    QString m_prefix;               // префикс Wine (GOG)
-    QString m_proton;               // каталог GE-Proton (GOG)
+    QString m_prefix;               // префикс Wine игры
+    QString m_proton;               // каталог GE-Proton
+    QString m_umu;                  // umu-run (пусто — запуск через GE-Proton напрямую)
+    QString m_launchToken;          // метка процессов этого запуска (REDANCHOR_LAUNCH)
+    int m_launchSerial = 0;         // защищает от ответа базы umu для прежнего запуска
+    QNetworkAccessManager *m_network = nullptr;
     QElapsedTimer m_started;
     QTimer *m_watch = nullptr;
 };

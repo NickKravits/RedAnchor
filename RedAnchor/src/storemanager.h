@@ -19,15 +19,18 @@ class QNetworkAccessManager;
 class QProcess;
 class QQmlEngine;
 
-// Магазины игр: GOG (gogdl).
+// Магазины игр: GOG (gogdl) и Epic Games Store (legendary).
 //
-// Инструмент GOG общий для всех пользователей, лежит в ~/.local/share/RedAnchor/RedAnchor Shell/tools,
-// его ставит ComponentsManager («Настройки → Обновления»).
+// Инструменты общие для всех пользователей, лежат в ~/.local/share/RedAnchor/RedAnchor Shell/tools,
+// их ставит ComponentsManager («Настройки → Обновления»).
 // Всё остальное своё у каждого пользователя консоли (папка профиля):
-//   stores/<магазин>/  — вход в магазин, кэш списка игр;
+//   stores/<магазин>/  — вход в магазин, кэш списка игр, настройки инструмента
+//                        (у legendary — stores/epic/legendary: вход, installed.json, метаданные);
 //   games/<магазин>/   — установленные игры.
 //
-// GOG: вход через страницу входа во встроенном браузере (WebLoginWindow.qml передаёт код).
+// Вход в оба магазина — через страницу входа во встроенном браузере (WebLoginWindow.qml
+// передаёт код авторизации): GOG — gogdl auth --code, Epic — legendary auth --code.
+// Установленные игры Epic ведёт сам legendary (installed.json) — библиотека сверяется с ним.
 //
 // Поставленная на загрузку игра сразу появляется в библиотеке (GameLibrary::addPending).
 // Загрузки идут по очереди, по одной игре.
@@ -37,9 +40,10 @@ class StoreManager : public QObject
     QML_ELEMENT
     QML_SINGLETON
 
-    // { gog: { toolInstalled, signedIn, account, avatar (URL), busy, message, listTitle } }
+    // { gog|epic: { toolInstalled, tool (имя загрузчика), signedIn, account, avatar (URL), busy, message, listTitle } }
     Q_PROPERTY(QVariantMap stores READ stores NOTIFY storesChanged)
-    // { gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | failed), progress }] }
+    // { gog|epic: [{ gameId, appId, title, installed, updateAvailable, status ("" | queued | downloading | failed),
+    //               progress }] }
     Q_PROPERTY(QVariantMap owned READ owned NOTIFY ownedChanged)
     // [{ id, store, appId, title, status, progress, message }]
     Q_PROPERTY(QVariantList downloads READ downloads NOTIFY downloadsChanged)
@@ -63,7 +67,7 @@ public:
 
     // Проверить, установлены ли инструменты магазинов (их ставит «Настройки → Обновления»)
     Q_INVOKABLE void refreshTools();
-    // Страница входа для встроенного браузера (GOG)
+    // Страница входа для встроенного браузера
     Q_INVOKABLE QString loginUrl(const QString &store) const;
     // Код авторизации со страницы входа
     Q_INVOKABLE void completeWebLogin(const QString &store, const QString &code);
@@ -71,6 +75,8 @@ public:
     // Обновить список купленных игр
     Q_INVOKABLE void refresh(const QString &store);
     Q_INVOKABLE void install(const QString &store, const QString &appId, const QString &title);
+    // Обновить установленную игру (Epic: legendary install --update-only) — через ту же очередь загрузок
+    Q_INVOKABLE void update(const QString &gameId);
     Q_INVOKABLE void cancel(const QString &gameId);
     Q_INVOKABLE void uninstall(const QString &gameId);
 
@@ -79,9 +85,10 @@ public:
     // Пока сведений нет — запрашивает их; по готовности придёт compatibilityChanged(gameId).
     Q_INVOKABLE QVariantMap compatibility(const QString &store, const QString &appId);
 
-    // Пути для запуска игр GOG
+    // Пути для запуска игр (GameLauncher)
     QString gogdlExecutable() const { return gogdlPath(); }
     QString gogAuthConfig() const { return gogAuthFile(); }
+    QString legendaryExecutable() const { return legendaryPath(); }
     QProcessEnvironment storeEnvironment(const QString &store) const { return environment(store); }
 
 signals:
@@ -115,6 +122,7 @@ private:
         QString message;
         QString listTitle;
         QList<OwnedGame> owned;
+        QSet<QString> updates;   // appId установленных игр, для которых вышло обновление
     };
     struct Download {
         QString store;
@@ -123,6 +131,7 @@ private:
         QString status = QStringLiteral("queued");
         double progress = -1;
         QString message;
+        bool update = false;     // обновление установленной игры
         QString id() const { return store + QLatin1Char(':') + appId; }
     };
 
@@ -135,6 +144,9 @@ private:
     QString storeDir(const QString &key) const;
     QString gogdlPath() const;
     QString gogAuthFile() const;
+    QString legendaryPath() const;
+    QString legendaryConfigDir() const;
+    QString toolPath(const QString &key) const;
     QProcessEnvironment environment(const QString &key) const;
 
     // pty — запустить в псевдотерминале (script из util-linux): инструмент выводит
@@ -151,9 +163,16 @@ private:
     void setBusy(const QString &key, bool busy, const QString &message = QString());
     void refreshGog();
     void fetchGogProducts(QStringList ids, int index);
+    void refreshEpic();
+    void loadEpicUpdates();
+    void syncEpicLibrary();
+    void startGogDownload(const QString &appId, const QString &title);
+    void startEpicDownload(const QString &appId, const QString &title, bool update);
+    void stopActiveProcess();
 
     Download *findDownload(const QString &id);
     void processDownloads();
+    void setDownloadProgress(double progress, const QString &message);
     void finishDownload(bool ok, const QString &message = QString());
     void cancelAllDownloads();
 

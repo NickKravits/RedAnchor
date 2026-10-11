@@ -27,6 +27,8 @@
 namespace {
 
 const QString kProtonRepo = QStringLiteral("GloriousEggroll/proton-ge-custom");
+// Инструменты, которые оболочка сама скачивает с GitHub в каталог tools
+const QStringList kTools = {QStringLiteral("umu"), QStringLiteral("gogdl"), QStringLiteral("legendary")};
 const QString kProtonPrefix = QStringLiteral("GE-Proton");
 // Каталог для распаковки нового Proton до проверки (точка — его не примут за установленный)
 const QString kProtonStaging = QStringLiteral(".redanchor-extract");
@@ -112,8 +114,10 @@ ComponentsManager::ComponentsManager(QObject *parent)
          tr("gamescope, Xwayland, Python 3, PipeWire и шрифт Inter — для сессии и запуска игр")},
         {QStringLiteral("drivers"), tr("Графический драйвер"), driver},
         {QStringLiteral("vulkan"), tr("Vulkan"), tr("Графический интерфейс для игр и Proton")},
-        {QStringLiteral("proton"), tr("Proton"), tr("GE-Proton — запуск Windows-игр из GOG")},
+        {QStringLiteral("proton"), tr("Proton"), tr("GE-Proton — запуск Windows-игр из GOG и Epic Games Store")},
+        {QStringLiteral("umu"), tr("umu-launcher"), tr("Запуск игр в Steam Runtime с исправлениями Proton для конкретных игр")},
         {QStringLiteral("gogdl"), tr("gogdl"), tr("Загрузка игр из GOG"), false},
+        {QStringLiteral("legendary"), tr("legendary"), tr("Загрузка игр из Epic Games Store"), false},
     };
 }
 
@@ -248,8 +252,10 @@ void ComponentsManager::check()
     checkPackages();
     checkProtonLocal();
     fetchProtonRelease();
-    checkToolLocal(QStringLiteral("gogdl"));
-    fetchToolRelease(QStringLiteral("gogdl"));
+    for (const QString &key : kTools) {
+        checkToolLocal(key);
+        fetchToolRelease(key);
+    }
 }
 
 // Выпуск с GitHub. Ответ кэшируется вместе с ETag: повторная проверка с If-None-Match
@@ -362,21 +368,57 @@ void ComponentsManager::download(const QUrl &url, const QString &target, const s
     });
 }
 
-// ---------- Загрузчик игр GOG (gogdl) ----------
+// ---------- Инструменты с GitHub: gogdl, legendary, umu-launcher ----------
 
 QString ComponentsManager::toolsDir() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/tools");
 }
 
-QString ComponentsManager::toolFile(const QString &)
+bool ComponentsManager::isTool(const QString &key)
 {
-    return QStringLiteral("gogdl");
+    return kTools.contains(key);
 }
 
-QString ComponentsManager::toolRepo(const QString &)
+// Имя исполняемого файла в каталоге tools (его же ищут StoreManager и GameLauncher)
+QString ComponentsManager::toolFile(const QString &key)
 {
+    if (key == QLatin1String("umu"))
+        return QStringLiteral("umu-run");
+    return key;   // gogdl, legendary
+}
+
+QString ComponentsManager::toolRepo(const QString &key)
+{
+    if (key == QLatin1String("legendary"))
+        return QStringLiteral("derrod/legendary");
+    if (key == QLatin1String("umu"))
+        return QStringLiteral("Open-Wine-Components/umu-launcher");
     return QStringLiteral("Heroic-Games-Launcher/heroic-gogdl");
+}
+
+// Насколько файл выпуска подходит как сборка для Linux x64 (0 — не подходит)
+//   umu-launcher: архив umu-launcher-<версия>-zipapp.tar (umu/umu-run — zipapp на Python);
+//   legendary:    legendary_linux_x64 (zipapp на Python, с 0.21), в старых выпусках — просто legendary;
+//   gogdl:        gogdl_linux_x86_64 или архив.
+int ComponentsManager::assetScore(const QString &key, const QString &assetName)
+{
+    const QString lower = assetName.toLower();
+    if (lower.endsWith(QLatin1String(".sha256")) || lower.endsWith(QLatin1String(".sha512"))
+        || lower.endsWith(QLatin1String(".sha512sum")) || lower.endsWith(QLatin1String(".sig"))
+        || lower.endsWith(QLatin1String(".asc")) || lower.contains(QLatin1String("arm"))
+        || lower.contains(QLatin1String("aarch64")))
+        return 0;
+    if (key == QLatin1String("umu"))
+        return lower.endsWith(QLatin1String("-zipapp.tar")) ? 2 : 0;
+    if (key == QLatin1String("legendary") && lower == QLatin1String("legendary"))
+        return 1;
+    if (!lower.contains(QLatin1String("linux")))
+        return 0;
+    if (key == QLatin1String("legendary") && lower.endsWith(QLatin1String(".zip")))
+        return 0;
+    return lower.contains(QLatin1String("x64")) || lower.contains(QLatin1String("x86_64")) || lower.contains(QLatin1String("amd64"))
+            ? 2 : 1;
 }
 
 // Остатки прежних версий: DepotDownloader (игры Steam) больше не нужен
@@ -414,22 +456,19 @@ void ComponentsManager::fetchToolRelease(const QString &key)
             return;
         }
         const QString tag = release.value(QStringLiteral("tag_name")).toString();
-        // Сборка для Linux x64: исполняемый файл (gogdl_linux_x86_64) или архив
+        // Сборка для Linux x64: исполняемый файл (gogdl_linux_x86_64, legendary_linux_x64) или архив
         Release found;
         found.tag = tag;
+        int best = 0;
         for (const QJsonValue &value : release.value(QStringLiteral("assets")).toArray()) {
             const QJsonObject asset = value.toObject();
             const QString assetName = asset.value(QStringLiteral("name")).toString();
-            const QString lower = assetName.toLower();
-            if (!lower.contains(QLatin1String("linux")) || lower.contains(QLatin1String("arm"))
-                || lower.contains(QLatin1String("aarch64")) || lower.endsWith(QLatin1String(".sha256"))
-                || lower.endsWith(QLatin1String(".sha512")) || lower.endsWith(QLatin1String(".sig"))
-                || lower.endsWith(QLatin1String(".asc")))
+            const int score = assetScore(key, assetName);
+            if (score <= best)
                 continue;
+            best = score;
             found.url = QUrl(asset.value(QStringLiteral("browser_download_url")).toString());
             found.fileName = QFileInfo(assetName).fileName();   // без каталогов в имени
-            if (lower.contains(QLatin1String("x64")) || lower.contains(QLatin1String("x86_64")) || lower.contains(QLatin1String("amd64")))
-                break;
         }
         if (!found.url.isValid() || found.fileName.isEmpty()) {
             qWarning("No Linux build of %s in the latest release", qPrintable(toolRepo(key)));
@@ -590,6 +629,13 @@ void ComponentsManager::applyPackageState(const QHash<QString, QString> &install
         // Proton — скрипт на Python 3
         if (findProgram(QStringLiteral("python3"), kSystemDirs).isEmpty())
             missing << QStringLiteral("Python 3");
+        // umu запускает игры в контейнере Steam Runtime (bwrap). Ubuntu 24.04+ через AppArmor
+        // запрещает программам непривилегированные пространства имён — пакет umu для Ubuntu
+        // ставит для этого профиль bwrap-userns-restrict из apparmor-profiles; делаем так же
+        if (readFileTrimmed(QStringLiteral("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")) == QLatin1String("1")
+            && !QFileInfo::exists(QStringLiteral("/etc/apparmor.d/bwrap-userns-restrict"))
+            && !QFileInfo::exists(QStringLiteral("/etc/apparmor.d/bwrap-userns-restrict-umu")))
+            missingRecommended << tr("профиль AppArmor для umu (bwrap)");
         if (!libraryExists(QStringLiteral("libxcb-cursor.so.0")) && native(QStringLiteral("libxcb-cursor0")).isEmpty())
             missing << QStringLiteral("libxcb-cursor0");
         if (!gamescope && !cage)
@@ -754,7 +800,7 @@ void ComponentsManager::processQueue()
     emit componentsChanged();
     if (m_current == QLatin1String("proton"))
         downloadProton();
-    else if (m_current == QLatin1String("gogdl"))
+    else if (isTool(m_current))
         installTool(m_current);
     else
         runHelper(m_current);
@@ -769,7 +815,7 @@ void ComponentsManager::finishCurrent(bool ok, const QString &message)
         if (ok) {
             c->state = QStringLiteral("installed");
             c->message = key == QLatin1String("drivers") && m_rebootRequired ? tr("Заработает после перезагрузки") : QString();
-            if (key == QLatin1String("proton") || key == QLatin1String("gogdl"))
+            if (key == QLatin1String("proton") || isTool(key))
                 c->version = c->latest;
         } else {
             c->state = QStringLiteral("failed");
@@ -780,7 +826,7 @@ void ComponentsManager::finishCurrent(bool ok, const QString &message)
     emit componentsChanged();
 
     // Уточняем версии установленных пакетов
-    if (ok && key != QLatin1String("proton") && key != QLatin1String("gogdl"))
+    if (ok && key != QLatin1String("proton") && !isTool(key))
         checkPackages();
 
     processQueue();

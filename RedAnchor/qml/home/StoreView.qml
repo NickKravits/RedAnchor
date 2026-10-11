@@ -13,7 +13,8 @@ FocusScope {
     property int section: 0
     readonly property var sections: [
         { key: "redstore", title: "RedStore" },
-        { key: "gog", title: "GOG" }
+        { key: "gog", title: "GOG" },
+        { key: "epic", title: "Epic Games" }
     ]
 
     signal webLoginRequested(string store)

@@ -23,9 +23,13 @@ class QProcess;
 //               (на нём написан Proton), PipeWire (громкость), шрифт Inter;
 //   "drivers" — графический драйвер: NVIDIA или Mesa (AMD, Intel), 64 и 32 бита;
 //   "vulkan"  — загрузчик Vulkan и драйверы Mesa Vulkan, 64 и 32 бита;
-//   "proton"  — GE-Proton (последний выпуск с GitHub) для Windows-игр из GOG;
-//   "gogdl"   — загрузчик игр GOG (последний выпуск с GitHub,
-//               в ~/.local/share/RedAnchor/RedAnchor Shell/tools — оттуда его берёт StoreManager).
+//   "proton"  — GE-Proton (последний выпуск с GitHub) для Windows-игр из GOG и Epic Games Store;
+//   "umu"     — umu-launcher (zipapp umu-run): запуск игр в Steam Runtime с исправлениями
+//               GE-Proton для конкретных игр (protonfixes) — им пользуется GameLauncher;
+//   "gogdl"   — загрузчик игр GOG;
+//   "legendary" — загрузчик игр Epic Games Store.
+// umu-launcher, gogdl и legendary — последние выпуски с GitHub, в
+// ~/.local/share/RedAnchor/RedAnchor Shell/tools (оттуда их берут StoreManager и GameLauncher).
 // Системные пакеты (system, drivers, vulkan) ставит помощник redanchor-components
 // (apt, от root через pkexec). Proton скачивается в
 // ~/.local/share/RedAnchor/RedAnchor Shell/compatibilitytools без прав root.
@@ -65,12 +69,12 @@ public:
     QString gpuVendor() const { return m_gpuVendor; }
     QString protonPath() const;
 
-    // Проверить, что установлено, и узнать последние версии Proton и gogdl.
+    // Проверить, что установлено, и узнать последние версии Proton, umu-launcher, gogdl и legendary.
     Q_INVOKABLE void check();
     // Поставить компонент в очередь установки.
     Q_INVOKABLE void install(const QString &key);
     // Установить всё отсутствующее и обновить устаревшее
-    // (по порядку: system → drivers → vulkan → proton → gogdl).
+    // (по порядку: system → drivers → vulkan → proton → umu → gogdl → legendary).
     Q_INVOKABLE void installAll();
 
 signals:
@@ -115,8 +119,10 @@ private:
     void download(const QUrl &url, const QString &target, const std::function<void(bool ok)> &done);
     void installTool(const QString &key);
     QString toolsDir() const;
+    static bool isTool(const QString &key);
     static QString toolFile(const QString &key);
     static QString toolRepo(const QString &key);
+    static int assetScore(const QString &key, const QString &assetName);
     void removeObsoleteTools();
     void processQueue();
     void finishCurrent(bool ok, const QString &message = QString());

@@ -50,21 +50,35 @@
 
 ### Магазины, библиотека и хранилище
 
-Во вкладке **Магазин** — разделы RedStore (пока в разработке) и GOG; переключение L2 / R2.
+Во вкладке **Магазин** — разделы RedStore (пока в разработке), GOG и Epic Games; переключение L2 / R2.
 Пока фокус в магазине, он раскрывается на весь экран: верхняя строка (аккаунт, время) скрывается,
 фон становится однотонным, вкладки и разделы — компактнее.
 
-Загрузчик gogdl для GOG ставится в **Настройки → Обновления**; если его нет, магазин предлагает
-установить обновления там.
+Загрузчики игр — gogdl для GOG и legendary для Epic Games Store — ставятся в
+**Настройки → Обновления**; если загрузчика нет, магазин предлагает установить обновления там.
 
-- **GOG** — gogdl. Вход через встроенный браузер (отдельное окно, Qt WebEngine), управляемый
-  геймпадом: крестовина выбирает элементы страницы, ✕ нажимает (на поле ввода — экранная
-  клавиатура), △ отправляет форму, ○ — отмена, правый стик — курсор (только в этом окне).
+Вход в оба магазина — через встроенный браузер (отдельное окно, Qt WebEngine), управляемый
+геймпадом: крестовина выбирает элементы страницы, ✕ нажимает (на поле ввода — экранная
+клавиатура), △ отправляет форму, ○ — отмена, правый стик — курсор (только в этом окне).
+Код авторизации оболочка перехватывает сама.
+
+- **GOG** — gogdl. Код входа — из адреса перенаправления `embed.gog.com/on_login_success`,
+  дальше `gogdl auth --code`.
+- **Epic Games Store** — [legendary](https://github.com/derrod/legendary). Страница входа Epic
+  заканчивается на `www.epicgames.com/id/api/redirect` с JSON, в котором есть `authorizationCode`
+  (так входят legendary и Heroic); оболочка передаёт его в `legendary auth --code`. Список игр —
+  `legendary list --json` (только игры: без дополнений и без игр, которые ставит чужой магазин —
+  EA app, Ubisoft Connect). Установка — `legendary install` в `games/epic/` с прогрессом в общей
+  очереди загрузок; прерванная загрузка при повторе продолжается с того же места. Если для
+  установленной игры вышло обновление, в её меню появляется «Обновить игру»
+  (`legendary install --update-only`). Удаление — `legendary uninstall`.
 
 Steam оболочка пока не поддерживает.
 
 У каждого пользователя консоли свои входы в магазины и свои игры — всё лежит в его профиле:
-`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/<магазин>/`. Удаление учётной записи
+`profiles/<id>/stores/<магазин>/` и `profiles/<id>/games/<магазин>/` (настройки legendary — вход,
+список установленных игр, метаданные — в `stores/epic/legendary/`, через `LEGENDARY_CONFIG_PATH`).
+Удаление учётной записи
 удаляет и её игры. При смене пользователя загрузки останавливаются.
 
 Поставленная на загрузку игра сразу появляется в **Библиотеке** (с прогрессом) — её уже можно
@@ -79,13 +93,27 @@ Steam оболочка пока не поддерживает.
 Ключ API задаётся опцией CMake `REDANCHOR_STEAMGRIDDB_KEY`.
 
 **Поддержка геймпада.** У выбранной в магазине игры видно, поддерживает ли она геймпад
-(для GOG — по списку возможностей игры). Если игра официально не поддерживает DualSense,
+(для GOG — по списку возможностей игры; для Epic открытого источника таких сведений нет —
+поддержка показывается как неизвестная, и игра получает контроллер Xbox). Если игра официально не поддерживает DualSense,
 перед установкой предупреждаем о системе раскладки RedAnchor (управление может быть неточным,
 значки — некорректными); если только мышь и клавиатура — что играть на геймпаде не получится.
 
-**Запуск игр** — ✕ в «Моих играх» и библиотеке, меню игры — Options.
-- **GOG** — `gogdl launch` с GE-Proton (Настройки → Обновления) в качестве обёртки. У каждой игры
-  свой префикс Wine (`profiles/<id>/prefixes/`), вывод — в `profiles/<id>/logs/`.
+**Запуск игр** — ✕ в «Моих играх» и библиотеке, меню игры — Options. Игру запускает загрузчик
+её магазина, обёртка — [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher)
+(`umu-run`): он запускает GE-Proton в контейнере Steam Runtime и применяет исправления для
+конкретной игры (protonfixes). Так же запускает игры Heroic Games Launcher.
+- **GOG** — `gogdl launch … --no-wine --wrapper umu-run`.
+- **Epic Games** — `legendary launch … --no-wine --wrapper umu-run`: legendary проверяет версию
+  и добавляет к игре параметры входа Epic (Epic Online Services) — игра по сети работает.
+  Если вышло обновление, legendary игру не запустит — оболочка подскажет обновить её в магазине.
+
+Переменные для umu — как у Heroic: `GAMEID` — id игры в базе umu
+(`umu.openwinecomponents.org/umu_api.php?codename=<id игры>&store=<gog|egs>`, иначе `umu-0`),
+`STORE` (`gog`, `egs`), `PROTONPATH` — установленный GE-Proton, `WINEPREFIX` — префикс игры.
+У каждой игры свой префикс Wine (`profiles/<id>/prefixes/<магазин>_<id игры>`), вывод — в
+`profiles/<id>/logs/`. При первом запуске umu скачивает Steam Runtime (нужен интернет, запуск
+дольше обычного). Если umu-launcher не установлен, игра запускается через GE-Proton напрямую,
+а экран запуска подсказывает установить umu в «Настройки → Обновления».
 
 Игра считается запущенной, пока живы её процессы (лаунчеры часто запускают игру и выходят), —
 до этого оболочка показывает фон и название игры; если игра официально не поддерживает
@@ -106,8 +134,17 @@ libinput ещё до запуска оболочки. Если после зак
 - **Системные компоненты.** gamescope (Weston и cage про запас), Xwayland, `libxcb-cursor0`, Python 3
   (на нём написан Proton), PipeWire/WirePlumber, шрифт Inter, BlueZ, NetworkManager, правила
   udev для геймпадов (`steam-devices`).
-- **gogdl.** Загрузчик игр GOG — последний выпуск с GitHub,
-  в `~/.local/share/RedAnchor/RedAnchor Shell/tools/`.
+- **umu-launcher.** Запуск игр в Steam Runtime — последний выпуск с GitHub
+  (`umu-launcher-<версия>-zipapp.tar`, внутри zipapp `umu-run` на Python 3).
+- **gogdl.** Загрузчик игр GOG — последний выпуск с GitHub (Heroic-Games-Launcher/heroic-gogdl).
+- **legendary.** Загрузчик игр Epic Games Store — последний выпуск с GitHub (derrod/legendary,
+  `legendary_linux_x64` — zipapp на Python 3).
+
+umu-launcher, gogdl и legendary лежат в `~/.local/share/RedAnchor/RedAnchor Shell/tools/` (версия —
+в файле `<инструмент>.version` рядом) и обновляются там же, без прав root. В Ubuntu 24.04+ AppArmor
+запрещает программам непривилегированные пространства имён, а они нужны контейнеру Steam Runtime:
+системные компоненты включают для этого профиль `bwrap-userns-restrict` из `apparmor-profiles`
+(как пакет umu для Ubuntu).
 - **Proton.** Последний GE-Proton с GitHub, проверяется по SHA-512 и распаковывается в
   `~/.local/share/RedAnchor/RedAnchor Shell/compatibilitytools/`; старые версии удаляются.
 
@@ -190,7 +227,7 @@ Proton скачивается без прав root.
 5. Собирает (`build-release/`) и ставит оболочку (`sudo cmake --install`), перечитывает правила udev,
    включает загрузку модуля `uinput` и добавляет пользователя в группу `input`.
 
-Proton (GE-Proton) и gogdl ставятся не скриптом, а самой оболочкой без прав root — на шаге мастера
+Proton (GE-Proton), umu-launcher, gogdl и legendary ставятся не скриптом, а самой оболочкой без прав root — на шаге мастера
 «Проверка обновлений» или в «Настройки → Обновления». Qt из `~/Qt` доступен только вашему
 пользователю: если сессией будут пользоваться другие учётные записи Linux, поставьте Qt в общий
 каталог (`QT_INSTALL_DIR=/opt/Qt`, каталог должен быть доступен на запись) или используйте системный Qt.
@@ -212,7 +249,8 @@ Proton (GE-Proton) и gogdl ставятся не скриптом, а само�
 | `cage` | запасной композитор (если gamescope нет или не запустился) | `system` |
 | `libxcb-cursor0` и прочие `libxcb-*`, `libxkbcommon-x11-0` | Qt работает внутри gamescope через Xwayland (xcb) | `system` / install.sh |
 | `libnss3`, `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libxtst6`, `libxkbfile1`, `libasound2t64`, `libpulse0` | QtWebEngine и QtMultimedia из aqtinstall | install.sh |
-| `python3` | `proton` (GE-Proton) — скрипт на Python | `system` |
+| `python3` (≥ 3.10) | `proton` (GE-Proton), `umu-run` и `legendary` — программы на Python | `system` |
+| `bubblewrap`, `apparmor-profiles` (только при ограничении пространств имён в AppArmor, Ubuntu 24.04+) | контейнер Steam Runtime у umu-launcher | `system` |
 | `pipewire`, `pipewire-pulse`, `wireplumber` (`wpctl`) или `pulseaudio-utils` (`pactl`) | громкость в оверлее | `system` |
 | `fonts-inter` | шрифт интерфейса (без него — системный sans) | `system` |
 | `bluez` | Bluetooth и сопряжение DualSense | `system` |
@@ -222,7 +260,8 @@ Proton (GE-Proton) и gogdl ставятся не скриптом, а само�
 | `util-linux` (`script`), `tar`, `coreutils` (`sha512sum`), `curl` | запуск инструментов с псевдотерминалом, распаковка и проверка Proton | есть в системе / `system` |
 | Драйвер: `nvidia-driver-*` + `libnvidia-gl-*:i386` или `libgl1-mesa-dri` (64 и 32 бита), `mesa-va-drivers`, `linux-firmware` | графика для игр | `drivers` |
 | `libvulkan1`, `mesa-vulkan-drivers` (64 и 32 бита), `vulkan-tools` | Vulkan для DXVK/VKD3D в Proton | `vulkan` |
-| GE-Proton, gogdl | игры GOG | ставит оболочка |
+| GE-Proton, umu-launcher | запуск Windows-игр | ставит оболочка |
+| gogdl, legendary | игры GOG и Epic Games Store | ставит оболочка |
 
 Цели помощника можно запускать и вручную: `sudo bash data/redanchor-components system`
 (после установки — `pkexec /usr/local/libexec/redanchor-components system`). Он печатает строки

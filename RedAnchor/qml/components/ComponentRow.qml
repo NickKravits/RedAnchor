@@ -1,6 +1,6 @@
 import QtQuick
 
-// Строка компонента (системные пакеты, драйвер, Vulkan, Proton, gogdl) для списков
+// Строка компонента (системные пакеты, драйвер, Vulkan, Proton, umu-launcher, gogdl, legendary) для списков
 // с моделью ComponentsManager.components: название, состояние, прогресс установки.
 // ✕ — установить или обновить, если это нужно.
 ConsoleListItem {
@@ -24,6 +24,7 @@ ConsoleListItem {
         case "drivers": return "chip"
         case "vulkan": return "vulkan"
         case "proton": return "proton"
+        case "umu": return "play"
         default: return "store"
         }
     }

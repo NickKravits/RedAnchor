@@ -4,18 +4,19 @@ import "ModelSync.js" as ModelSync
 import "Format.js" as Format
 import "Compat.js" as Compat
 
-// Раздел магазина (GOG): вход и купленные игры сеткой (gogdl).
-// ✕ на игре — установить; на установленной или загружаемой — меню действий.
-// Загрузчик GOG ставится в «Настройки → Обновления».
+// Раздел магазина (GOG — gogdl, Epic Games — legendary): вход и купленные игры сеткой.
+// ✕ на игре — установить; на установленной или загружаемой — меню действий
+// (у игр Epic с вышедшим обновлением — «Обновить игру»).
+// Загрузчики магазинов ставятся в «Настройки → Обновления».
 FocusScope {
     id: root
 
-    property string store                       // "gog"
+    property string store                       // "gog" | "epic"
     readonly property var state_: StoreManager.stores[store] || ({})
     // Без загрузчика выбирать нечего — фокус остаётся на панели магазинов
     readonly property bool focusable: state_.toolInstalled === true
 
-    // Встроенный браузер для входа (GOG) открывает главный экран
+    // Встроенный браузер для входа открывает главный экран
     signal webLoginRequested(string store)
 
     function syncGames() {
@@ -24,7 +25,8 @@ FocusScope {
 
     function entry(i) {
         const e = games.get(i)
-        return { id: e.gameId, appId: e.appId, title: e.title, installed: e.installed, status: e.status }
+        return { id: e.gameId, appId: e.appId, title: e.title, installed: e.installed, status: e.status,
+                 updateAvailable: e.updateAvailable === true }
     }
 
     // Причина неудачной загрузки
@@ -46,12 +48,18 @@ FocusScope {
         }
         if (game.installed) {
             const pinned = GameLibrary.isPinned(game.id)
-            menu.show(game.title, qsTr("Установлена — игра есть в библиотеке"), [
+            const actions = [
                 pinned ? { text: qsTr("Открепить с главного экрана"), icon: "close", run: () => GameLibrary.unpin(game.id) }
                        : { text: qsTr("Закрепить на главном экране"), icon: "plus", run: () => GameLibrary.pin(game.id) },
                 { text: qsTr("Удалить игру"), icon: "trash", run: () => StoreManager.uninstall(game.id) },
                 { text: qsTr("Отмена") }
-            ], grid)
+            ]
+            if (game.updateAvailable)
+                actions.unshift({ text: qsTr("Обновить игру"), icon: "download", run: () => StoreManager.update(game.id) })
+            menu.show(game.title,
+                      game.status === "failed" ? root.failureText(game.id)
+                      : game.updateAvailable ? qsTr("Установлена — вышло обновление")
+                      : qsTr("Установлена — игра есть в библиотеке"), actions, grid)
             return
         }
         // Перед установкой — поддержка геймпада: предупреждаем, если игра без поддержки
@@ -138,7 +146,8 @@ FocusScope {
         anchors.verticalCenterOffset: -Theme.px(30)
         icon: "download"
         title: qsTr("Нужно установить обновления")
-        text: qsTr("Для GOG нужен загрузчик игр gogdl. Установите его: Настройки → Обновления.")
+        text: qsTr("Для %1 нужен загрузчик игр %2. Установите его: Настройки → Обновления.")
+                  .arg(Format.storeName(root.store)).arg(root.state_.tool || "")
     }
 
     // ---------- Вход ----------
