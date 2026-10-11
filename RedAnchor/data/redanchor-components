@@ -350,7 +350,7 @@ install_drivers() {
 steam_packages() {
     echo "$1"
     local pkg
-    for pkg in steam-libs-amd64 steam-libs-i386:i386; do
+    for pkg in steam-libs-amd64 steam-libs:i386 steam-libs-i386:i386; do
         pkg_available "$pkg" && echo "$pkg"
     done
 }
@@ -384,6 +384,9 @@ install_steam() {
         echo "$owner steam/purge note " | debconf-set-selections 2>/dev/null || true
     done
     if is_ubuntu; then
+        # steam-installer — в multiverse, а его 32-битные библиотеки (steam-libs:i386) с
+        # Ubuntu 26.04 — в universe
+        enable_component universe
         enable_component multiverse
     elif is_debian; then
         enable_component contrib
