@@ -116,6 +116,10 @@ BluetoothManager::BluetoothManager(QObject *parent)
             m_helper->kill();
     });
 
+    m_connectClock.start();
+    m_connectRetry.setInterval(3000);
+    connect(&m_connectRetry, &QTimer::timeout, this, &BluetoothManager::retryConnect);
+
     // bluetoothd может стартовать позже оболочки или перезапуститься
     // (в том числе его перезапускает помощник сопряжения).
     m_watcher = new QDBusServiceWatcher(kBluez, bus(),
@@ -310,6 +314,61 @@ void BluetoothManager::onHelperFinished(int exitCode)
             setDBusProperty(it.key(), kDeviceIface, QStringLiteral("Trusted"), true);
     }
     setPairingState(QStringLiteral("paired"));
+    // Дальше пользователь отключает кабель и нажимает PS. Первое подключение по Bluetooth
+    // BlueZ может отклонить (ещё не знает сервисов контроллера) — подключаем сами
+    startConnectRetry(180);
+}
+
+void BluetoothManager::startConnectRetry(int seconds)
+{
+    m_connectUntil = qMax(m_connectUntil, m_connectClock.elapsed() + qint64(seconds) * 1000);
+    if (!m_connectRetry.isActive()) {
+        m_connectRetry.start();
+        QTimer::singleShot(0, this, &BluetoothManager::retryConnect);
+    }
+}
+
+void BluetoothManager::retryConnect()
+{
+    if (m_connectClock.elapsed() > m_connectUntil || m_adapterPath.isEmpty()) {
+        m_connectRetry.stop();
+        return;
+    }
+    // Контроллер, который сопрягли, — или любой сопряжённый геймпад без известных сервисов
+    QString path;
+    for (auto it = m_devices.cbegin(); it != m_devices.cend(); ++it) {
+        const QVariantMap &props = it.value();
+        if (!props.value(QStringLiteral("Paired")).toBool() || !isOurController(props))
+            continue;
+        const bool target = !m_target.isEmpty()
+                            && props.value(QStringLiteral("Address")).toString().compare(m_target, Qt::CaseInsensitive) == 0;
+        const bool ready = props.value(QStringLiteral("Connected")).toBool()
+                           && props.value(QStringLiteral("UUIDs")).toStringList().contains(kHidUuid, Qt::CaseInsensitive);
+        if (target && ready) {
+            qInfo("Controller %s connected over Bluetooth", qPrintable(m_target));
+            m_connectRetry.stop();
+            m_connectUntil = 0;
+            return;
+        }
+        if (!ready && (target || path.isEmpty()))
+            path = it.key();
+    }
+    if (path.isEmpty() || m_connectInFlight)
+        return;
+    if (!m_devices.value(path).value(QStringLiteral("Trusted")).toBool())
+        setDBusProperty(path, kDeviceIface, QStringLiteral("Trusted"), true);
+    m_connectInFlight = true;
+    QDBusMessage call = QDBusMessage::createMethodCall(kBluez, path, kDeviceIface, QStringLiteral("Connect"));
+    auto *watcher = new QDBusPendingCallWatcher(bus().asyncCall(call, 10 * 1000), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, path](QDBusPendingCallWatcher *w) {
+        w->deleteLater();
+        m_connectInFlight = false;
+        const QDBusPendingReply<> reply = *w;
+        if (reply.isError())
+            qInfo("Controller connect %s: %s", qPrintable(path), qPrintable(reply.error().name()));
+        else
+            qInfo("Controller connect %s: ok", qPrintable(path));
+    });
 }
 
 bool BluetoothManager::isOurController(const QVariantMap &props) const
@@ -336,8 +395,8 @@ void BluetoothManager::checkDevice(const QString &path)
     m_resolving.insert(path);
     qInfo("Controller %s connected without known services, resolving",
           qPrintable(props.value(QStringLiteral("Address")).toString()));
-    QDBusMessage call = QDBusMessage::createMethodCall(kBluez, path, kDeviceIface, QStringLiteral("Connect"));
-    bus().asyncCall(call, 30 * 1000);
+    // Одного Connect часто мало: контроллер успевает отключиться, пока BlueZ его опрашивает
+    startConnectRetry(60);
 }
 
 bool BluetoothManager::isAllowedDevice(const QString &devicePath)

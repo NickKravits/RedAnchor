@@ -35,6 +35,9 @@ PEND=99
 SOURCES_CHANGED=0
 
 progress() { echo "PROGRESS $1 $2"; }
+# Команда упала и прервала установку — пишем, какая именно (оболочка покажет это сообщение)
+set -E
+trap 'rc=$?; echo "ERROR Команда «${BASH_COMMAND}» завершилась с кодом ${rc}" >&2' ERR
 log() { echo "redanchor-components: $*" >&2; }
 
 if [[ $(id -u) -ne 0 ]]; then

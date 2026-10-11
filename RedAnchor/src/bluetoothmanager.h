@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QObject>
 #include <QSet>
+#include <QElapsedTimer>
 #include <QTimer>
 
 #include <functional>
@@ -104,6 +105,10 @@ private:
     void setPairingState(const QString &state);
     void onHelperFinished(int exitCode);
     void checkDevice(const QString &path);
+    // Сопряжённый по кабелю контроллер ещё не подключился по Bluetooth: просим BlueZ
+    // подключить его сами, раз в несколько секунд, пока не получится (или не выйдет время)
+    void startConnectRetry(int seconds);
+    void retryConnect();
     bool isOurController(const QVariantMap &props) const;
     void callDevice(const QString &path, const QString &method, int timeoutMs, const QString &errorText,
                     std::function<void()> onSuccess = {});
@@ -127,4 +132,8 @@ private:
     QDBusServiceWatcher *m_watcher = nullptr;
     QProcess *m_helper = nullptr;
     QTimer m_helperTimeout;
+    QTimer m_connectRetry;
+    QElapsedTimer m_connectClock;
+    qint64 m_connectUntil = 0;           // мс от m_connectClock, до каких пор повторять
+    bool m_connectInFlight = false;
 };

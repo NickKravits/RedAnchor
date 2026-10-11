@@ -135,6 +135,9 @@ Window {
 
         opacity: opened ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: Theme.animNormal; easing.type: Easing.OutCubic } }
+        // Строка значков и панели выезжают с самого низа экрана
+        property real slide: opened ? 0 : overlay.height * 0.35
+        Behavior on slide { NumberAnimation { duration: Theme.animNormal + 60; easing.type: Easing.OutCubic } }
 
         Keys.onPressed: (event) => {
             if (event.key === Qt.Key_Escape) {
@@ -148,19 +151,21 @@ Window {
             }
         }
 
-        // Затемнение: сильнее к низу, слабее к верху
+        // Затемнение: снизу тёмное, к верху прозрачное
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.25) }
-                GradientStop { position: 0.55; color: Qt.rgba(0.02, 0.022, 0.026, 0.55) }
-                GradientStop { position: 1.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.92) }
+                GradientStop { position: 0.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.0) }
+                GradientStop { position: 0.35; color: Qt.rgba(0.02, 0.022, 0.026, 0.08) }
+                GradientStop { position: 0.65; color: Qt.rgba(0.02, 0.022, 0.026, 0.55) }
+                GradientStop { position: 1.0; color: Qt.rgba(0.02, 0.022, 0.026, 0.94) }
             }
         }
 
         // ---------- Панель выбранного значка ----------
         Rectangle {
             id: panelBox
+            transform: Translate { y: content.slide }
             visible: opacity > 0
             opacity: content.panel !== "" ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: Theme.animFast } }
@@ -193,6 +198,7 @@ Window {
         // Название выбранного значка
         Text {
             id: label
+            transform: Translate { y: content.slide }
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: row.top
             anchors.bottomMargin: Theme.px(22)
@@ -207,6 +213,7 @@ Window {
         // ---------- Строка значков ----------
         FocusScope {
             id: row
+            transform: Translate { y: content.slide }
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottom: hints.top
             anchors.bottomMargin: Theme.px(40)
@@ -287,6 +294,7 @@ Window {
 
         HintBar {
             id: hints
+            transform: Translate { y: content.slide }
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.rightMargin: Theme.gutter

@@ -1,5 +1,7 @@
 #include "componentsmanager.h"
 
+#include <QDateTime>
+
 #include <QCollator>
 #include <QCoreApplication>
 #include <QDir>
@@ -295,9 +297,11 @@ void ComponentsManager::fetchRelease(const QString &repo, const ReleaseCallback 
         if (reply->error() != QNetworkReply::NoError || status != 200) {
             const bool limited = status == 403 || status == 429;
             qWarning("GitHub %s: HTTP %d %s", qPrintable(repo), status, qPrintable(reply->errorString()));
+            // Причина как есть (имя хоста не найдено, ошибка TLS, таймаут…) — по ней видно,
+            // что именно не так, а не просто «нет интернета»
             fromCache(limited ? tr("GitHub временно ограничил запросы — повторите позже")
-                              : status == 0 ? tr("Нет подключения к интернету")
-                                            : tr("Сервер GitHub недоступен"));
+                              : status == 0 ? tr("Нет связи с GitHub: %1").arg(reply->errorString())
+                                            : tr("Сервер GitHub ответил ошибкой %1").arg(status));
             return;
         }
         const QJsonObject release = QJsonDocument::fromJson(body).object();
@@ -411,7 +415,7 @@ void ComponentsManager::fetchToolRelease(const QString &key)
         const bool installed = QFileInfo(toolsDir() + QLatin1Char('/') + toolFile(key)).isExecutable();
         if (!error.isEmpty()) {
             setState(key, installed ? QStringLiteral("installed") : QStringLiteral("missing"),
-                     installed ? tr("Не удалось проверить обновления") : error);
+                     installed ? tr("Обновления не проверены: %1").arg(error) : error);
             endCheck();
             return;
         }
@@ -710,7 +714,7 @@ void ComponentsManager::fetchProtonRelease()
         const QString local = c ? c->version : QString();
         if (!error.isEmpty()) {
             setState(QStringLiteral("proton"), local.isEmpty() ? QStringLiteral("missing") : QStringLiteral("installed"),
-                     local.isEmpty() ? error : tr("Не удалось проверить обновления"));
+                     local.isEmpty() ? error : tr("Обновления не проверены: %1").arg(error));
             endCheck();
             return;
         }
@@ -842,23 +846,50 @@ void ComponentsManager::runHelper(const QString &key)
         }
     };
     connect(m_process, &QProcess::readyReadStandardOutput, this, parseOutput);
-    connect(m_process, &QProcess::readyReadStandardError, this, [this] {
-        const QByteArray text = m_process->readAllStandardError().trimmed();
-        if (!text.isEmpty())
-            qInfo("redanchor-components: %s", text.constData());
-    });
-    connect(m_process, &QProcess::finished, this, [this, parseOutput](int code, QProcess::ExitStatus status) {
+    // Весь вывод помощника (apt) — в журнал ~/.local/state/redanchor/components.log,
+    // а последняя ошибка — в сообщение компонента
+    const QString logDir = QDir::homePath() + QStringLiteral("/.local/state/redanchor");
+    QDir().mkpath(logDir);
+    auto log = std::make_shared<QFile>(logDir + QStringLiteral("/components.log"));
+    if (log->open(QIODevice::Append))
+        log->write("\n==== " + QDateTime::currentDateTime().toString(Qt::ISODate).toUtf8() + " " + key.toUtf8() + " ====\n");
+    auto lastError = std::make_shared<QString>();
+    const auto takeErrors = [this, log, lastError] {
+        const QByteArray text = m_process->readAllStandardError();
+        if (text.isEmpty())
+            return;
+        if (log->isOpen()) {
+            log->write(text);
+            log->flush();
+        }
+        for (const QByteArray &raw : text.split('\n')) {
+            const QString line = QString::fromUtf8(raw).trimmed();
+            if (line.isEmpty())
+                continue;
+            qInfo("redanchor-components: %s", qPrintable(line));
+            // «E: …» — ошибка apt, «redanchor-components: …» — сообщение помощника
+            if (line.startsWith(QLatin1String("E: ")) || line.startsWith(QLatin1String("ERROR ")))
+                *lastError = line.section(QLatin1Char(' '), 1);
+            else if (line.startsWith(QLatin1String("redanchor-components: ")) && line.contains(QLatin1String("не ")))
+                *lastError = line.mid(22);
+        }
+    };
+    connect(m_process, &QProcess::readyReadStandardError, this, takeErrors);
+    connect(m_process, &QProcess::finished, this, [this, parseOutput, takeErrors, lastError](int code, QProcess::ExitStatus status) {
         parseOutput();   // последние строки (REBOOT) могли прийти вместе с завершением
-        const QByteArray tail = m_process->readAllStandardError().trimmed();
-        if (!tail.isEmpty())
-            qInfo("redanchor-components: %s", tail.constData());
+        takeErrors();
         m_process->deleteLater();
         m_process = nullptr;
         const bool ok = status == QProcess::NormalExit && code == 0;
         // 126/127 — pkexec: в доступе отказано или аутентификация не пройдена
-        finishCurrent(ok, ok ? QString()
-                          : code == 126 || code == 127 ? tr("Нет прав на установку.")
-                          : tr("Не удалось установить. Проверьте подключение к интернету."));
+        QString message;
+        if (!ok) {
+            message = code == 126 || code == 127 ? tr("Нет прав на установку (pkexec).")
+                    : !lastError->isEmpty() ? *lastError
+                    : tr("Ошибка установки (код %1).").arg(code);
+            message += tr(" Подробности: ~/.local/state/redanchor/components.log");
+        }
+        finishCurrent(ok, message);
     });
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error != QProcess::FailedToStart)
