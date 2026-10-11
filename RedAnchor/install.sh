@@ -468,6 +468,14 @@ aqt_install() {
     for base in "${AQT_MIRRORS[@]}"; do
         for algo in sha256 sha1; do
             aqt_attempt "$base" "$algo" "$@" && return 0
+            # WebEngine и PDF с Qt 6.8 лежат в «расширениях». Если у их списка пакетов на зеркале
+            # нет контрольной суммы, aqt молча пропускает расширение и пишет «not found» — это
+            # не «модуля нет», а та же нехватка контрольных сумм
+            if [[ " $* " == *" qtwebengine "* || " $* " == *" qtpdf "* ]] &&
+               grep -qi 'not found while parsing' <<<"$AQT_ERROR"; then
+                had_checksum=1
+                continue
+            fi
             # Нет такой версии или модуля — другие зеркала не помогут
             if grep -qiE 'not (a valid|found|available)|invalid version|no qt version' <<<"$AQT_ERROR"; then
                 return 1
@@ -484,7 +492,7 @@ aqt_install() {
     # Архивы на зеркалах есть, но контрольные суммы не скачиваются — с согласия
     # пользователя ставим без проверки (файлы всё равно идут по HTTPS с зеркала Qt)
     if [[ $had_checksum -eq 1 && $AQT_NO_HASH -eq 0 && $ASSUME_YES -eq 0 && -t 0 ]] &&
-       ask "Контрольные суммы Qt недоступны ни на одном зеркале. Установить Qt без их проверки (файлы всё равно идут по HTTPS)?"; then
+       ask "Контрольные суммы Qt ($*) недоступны на зеркалах. Установить без их проверки (файлы всё равно идут по HTTPS)?"; then
         AQT_NO_HASH=1
         for base in "${AQT_MIRRORS[@]}"; do
             aqt_attempt "$base" sha256 "$@" && return 0
