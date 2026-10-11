@@ -414,8 +414,16 @@ install_steam() {
     fi
     apt_update
 
-    # Клиент из Ubuntu ставим без репозитория Valve (если steam-launcher от Valve ещё не стоит)
+    # Клиент из Ubuntu ставим без репозитория Valve (если steam-launcher от Valve ещё не стоит).
+    # Недоустановленный steam-launcher (прошлая неудачная попытка) убираем — иначе он
+    # держит зависимости и мешает
     if ! pkg_installed steam-launcher; then
+        if dpkg-query -W steam-launcher >/dev/null 2>&1; then
+            log "убираем недоустановленный steam-launcher"
+            dpkg --purge --force-depends steam-launcher >&2 || true
+            apt-get purge -y "${APT_OPTS[@]}" steam-libs-i386:i386 steam-libs-amd64 >&2 || true
+            repair_dpkg
+        fi
         disable_valve_repo
         apt_update
     fi
