@@ -418,7 +418,7 @@ AQT_ERROR=""
 # aqt_install <сборка> [аргументы…] — ставит Qt $QT_VERSION, пробуя зеркала по очереди.
 # При неудаче в AQT_ERROR — последняя строка ERROR из вывода aqt
 aqt_install() {
-    local arch=$1 base out pid rc start line dest alog="$LOG_DIR/aqt-current.log"
+    local arch=$1 base out pid rc start line mb dest alog="$LOG_DIR/aqt-current.log"
     shift
     dest=$(realpath -m "$QT_INSTALL_DIR")
     for base in "${AQT_MIRRORS[@]}"; do
@@ -434,8 +434,12 @@ aqt_install() {
             if [[ $INTERACTIVE_OUT -eq 1 ]]; then
                 line=$(grep -E 'INFO|ERROR|WARN' "$alog" 2>/dev/null | tail -n 1 | tr -d '\r' |
                        sed -E 's/^(INFO|WARNING|ERROR) *: *//' | cut -c1-60 || true)
-                printf '\r\e[K      %s%d:%02d%s  %s' "$C_CYAN" $(((SECONDS - start) / 60)) \
-                    $(((SECONDS - start) % 60)) "$C_RESET" "${line:-соединение с $base…}"
+                # aqt пишет о модуле, только когда он скачан и распакован, а большие модули
+                # качаются минутами — показываем, сколько уже скачано (архивы лежат в текущем
+                # каталоге aqt) и распаковано
+                mb=$(du -scm "$LOG_DIR"/*.7z "$dest/$QT_VERSION" 2>/dev/null | tail -n 1 | cut -f1 || true)
+                printf '\r\e[K      %s%d:%02d%s  %s МБ  %s' "$C_CYAN" $(((SECONDS - start) / 60)) \
+                    $(((SECONDS - start) % 60)) "$C_RESET" "${mb:-0}" "${line:-соединение с $base…}"
             fi
             sleep 1
         done
