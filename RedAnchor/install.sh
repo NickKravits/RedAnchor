@@ -418,16 +418,33 @@ AQT_ERROR=""
 # aqt_install <сборка> [аргументы…] — ставит Qt $QT_VERSION, пробуя зеркала по очереди.
 # При неудаче в AQT_ERROR — последняя строка ERROR из вывода aqt
 aqt_install() {
-    local arch=$1 base out
+    local arch=$1 base out pid rc start line dest alog="$LOG_DIR/aqt-current.log"
     shift
+    dest=$(realpath -m "$QT_INSTALL_DIR")
     for base in "${AQT_MIRRORS[@]}"; do
         echo "aqt install-qt $QT_VERSION $arch $* (зеркало $base)" >>"$LOG"
-        if out=$("$AQT_VENV/bin/aqt" install-qt linux desktop "$QT_VERSION" "$arch" \
-                 -O "$QT_INSTALL_DIR" -b "$base" --timeout 30 "$@" 2>&1); then
-            echo "$out" >>"$LOG"
-            return 0
-        fi
+        : >"$alog"
+        # aqt качает долго и молча — пока он работает, показываем время и его последнюю строку.
+        # Запускаем из каталога журналов: aqt кладёт свой aqtinstall.log в текущий каталог
+        (cd "$LOG_DIR" && exec "$AQT_VENV/bin/aqt" install-qt linux desktop "$QT_VERSION" "$arch" \
+            -O "$dest" -b "$base" --timeout 30 "$@") >"$alog" 2>&1 &
+        pid=$!
+        start=$SECONDS
+        while kill -0 "$pid" 2>/dev/null; do
+            if [[ $INTERACTIVE_OUT -eq 1 ]]; then
+                line=$(grep -E 'INFO|ERROR|WARN' "$alog" 2>/dev/null | tail -n 1 | tr -d '\r' |
+                       sed -E 's/^(INFO|WARNING|ERROR) *: *//' | cut -c1-60 || true)
+                printf '\r\e[K      %s%d:%02d%s  %s' "$C_CYAN" $(((SECONDS - start) / 60)) \
+                    $(((SECONDS - start) % 60)) "$C_RESET" "${line:-соединение с $base…}"
+            fi
+            sleep 1
+        done
+        rc=0
+        wait "$pid" || rc=$?
+        [[ $INTERACTIVE_OUT -eq 1 ]] && printf '\r\e[K'
+        out=$(cat "$alog")
         echo "$out" >>"$LOG"
+        [[ $rc -eq 0 ]] && return 0
         AQT_ERROR=$(grep -E 'ERROR' <<<"$out" | tail -1 | sed -E 's/^ERROR *: *//' || true)
         [[ -n $AQT_ERROR ]] || AQT_ERROR=$(tail -1 <<<"$out")
         # Нет такой версии или модуля — другие зеркала не помогут
