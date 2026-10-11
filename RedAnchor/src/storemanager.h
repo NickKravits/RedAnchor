@@ -43,10 +43,10 @@ class StoreManager : public QObject
 
     // { steam|gog: { toolInstalled (Steam — клиент установлен), signedIn, account (Steam — имя
     //                профиля), avatar (URL), busy, message, listTitle,
-    //                Steam ещё: phase ("" | starting | signin | bigpicture | stopping),
+    //                Steam ещё: phase ("" | starting | signin | stopping),
     //                phaseProgress (0..1 | -1), online } }
     Q_PROPERTY(QVariantMap stores READ stores NOTIFY storesChanged)
-    // { steam|gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | confirm | failed), progress }] }
+    // { steam|gog: [{ gameId, appId, title, installed, status ("" | queued | downloading | failed), progress }] }
     Q_PROPERTY(QVariantMap owned READ owned NOTIFY ownedChanged)
     // [{ id, store, appId, title, status, progress, message }]
     Q_PROPERTY(QVariantList downloads READ downloads NOTIFY downloadsChanged)
@@ -74,11 +74,10 @@ public:
     Q_INVOKABLE QString loginUrl(const QString &store) const;
     // Код авторизации со страницы входа
     Q_INVOKABLE void completeWebLogin(const QString &store, const QString &code);
-    // Вход в Steam: Big Picture поверх оболочки, закрывается сам после входа
+    // Вход в Steam: Big Picture поверх оболочки, закрывается сам после входа.
+    // Это единственный раз, когда Steam виден, — дальше он работает молча в фоне
     Q_INVOKABLE void steamSignIn();
-    // Открыть Steam Big Picture (магазин Steam, настройки) и закрыть его
-    Q_INVOKABLE void openSteam();
-    Q_INVOKABLE void closeSteam();
+    Q_INVOKABLE void cancelSteamSignIn();
     Q_INVOKABLE void signOut(const QString &store);
     // Обновить список купленных игр
     Q_INVOKABLE void refresh(const QString &store);

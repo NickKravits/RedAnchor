@@ -565,14 +565,9 @@ void StoreManager::steamSignIn()
     m_steam->signIn();
 }
 
-void StoreManager::openSteam()
+void StoreManager::cancelSteamSignIn()
 {
-    m_steam->openBigPicture();
-}
-
-void StoreManager::closeSteam()
-{
-    m_steam->closeBigPicture();
+    m_steam->cancelSignIn();
 }
 
 void StoreManager::signOut(const QString &key)

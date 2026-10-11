@@ -47,8 +47,6 @@ FocusScope {
             GameLauncher.dismiss()
         else if (!root.failed && event.key === Qt.Key_Escape)
             GameLauncher.cancel()
-        else if (root.steamGame && !root.running && event.key === Qt.Key_Space)
-            StoreManager.openSteam()   // Steam ждёт подтверждения (соглашение, выбор режима запуска)
         event.accepted = true
     }
 
@@ -197,7 +195,6 @@ FocusScope {
         GlyphText {
             text: root.failed ? qsTr("{circle} — закрыть")
                   : root.running ? qsTr("{ps} — меню: закрыть игру, громкость, питание")
-                  : root.steamGame && GameLauncher.slow ? qsTr("{circle} — отменить запуск, {triangle} — открыть Steam")
                   : qsTr("{circle} — отменить запуск")
             color: Theme.textSecondary
             pixelSize: Theme.fontSmall

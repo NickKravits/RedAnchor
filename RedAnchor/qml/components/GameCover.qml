@@ -12,7 +12,7 @@ Item {
     property string store
     property string appId
     property string title
-    // "" | "queued" | "downloading" | "confirm" | "failed"
+    // "" | "queued" | "downloading" | "failed"
     property string status
     property real progress: -1
     property bool installed: false
@@ -133,10 +133,9 @@ Item {
 
             Text {
                 text: root.status === "queued" ? qsTr("В очереди")
-                    : root.status === "confirm" ? qsTr("Подтвердите в Steam")
                     : root.status === "failed" ? qsTr("Ошибка загрузки")
                     : root.progress >= 0 ? Math.round(root.progress * 100) + "%" : qsTr("Подготовка…")
-                color: root.status === "failed" || root.status === "confirm" ? Theme.warning : Theme.textPrimary
+                color: root.status === "failed" ? Theme.warning : Theme.textPrimary
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSmall
                 font.weight: Font.Medium

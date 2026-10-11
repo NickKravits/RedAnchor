@@ -79,7 +79,7 @@ FocusScope {
                 visible: root.working
                 text: qsTr("Отмена")
                 icon: "close"
-                onClicked: StoreManager.closeSteam()
+                onClicked: StoreManager.cancelSteamSignIn()
             }
             Spinner {
                 visible: root.working

@@ -41,8 +41,8 @@ constexpr qint64 StateInProgress = StateUpdateRunning | StateUpdatePaused | Stat
 // SteamID64 = это число + id аккаунта
 constexpr quint64 SteamIdBase = 76561197960265728ULL;
 
-// Клиент сам не начал загрузку за это время — просим подтвердить установку в Big Picture
-constexpr qint64 ConfirmAfterMs = 120000;
+// Клиент сам не начал загрузку за это время — пробуем ещё раз
+constexpr qint64 RetryAfterMs = 120000;
 // Столько ждём, пока клиент войдёт в аккаунт, чтобы запустить игру
 constexpr qint64 OnlineTimeoutMs = 180000;
 
@@ -402,7 +402,7 @@ void SteamClient::runCommand(const QStringList &args)
     process.startDetached();
 }
 
-void SteamClient::startClient(Mode mode, const QString &url)
+void SteamClient::startClient(Mode mode)
 {
     if (m_home.isEmpty())
         return;
@@ -413,34 +413,25 @@ void SteamClient::startClient(Mode mode, const QString &url)
     }
     if (m_stopping) {
         // Клиент ещё закрывается — запустим, когда закроется
-        m_afterStop.append([this, mode, url] { startClient(mode, url); });
+        m_afterStop.append([this, mode] { startClient(mode); });
         return;
     }
-    if (running()) {
-        if (mode == Mode::BigPicture) {
-            setPhase(m_signInStarted ? QStringLiteral("signin") : QStringLiteral("bigpicture"));
-            runCommand({QStringLiteral("steam://open/bigpicture")});
-            if (!url.isEmpty())
-                QTimer::singleShot(2500, this, [this, url] { runCommand({url}); });
-        }
+    if (running())
         return;
-    }
 
     applyConfig();
     m_online = false;
     m_wantRunning = true;
     QStringList args;
     if (mode == Mode::BigPicture) {
+        // Big Picture — только для входа в аккаунт
         args = {QStringLiteral("-gamepadui")};
-        setPhase(m_signInStarted ? QStringLiteral("signin") : QStringLiteral("bigpicture"));
+        setPhase(QStringLiteral("signin"));
     } else {
         // В фоне: без окон, без чата и списка друзей
         args = {QStringLiteral("-silent"), QStringLiteral("-nochatui"), QStringLiteral("-nofriendsui")};
         setPhase(QStringLiteral("starting"));
     }
-    if (!url.isEmpty())
-        args.append(url);
-
     QDir().mkpath(m_profile + QStringLiteral("/logs"));
     auto log = std::make_shared<QFile>(m_profile + QStringLiteral("/logs/steam.log"));
     if (!log->open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -601,7 +592,7 @@ void SteamClient::restartSilent()
 {
     if (m_home.isEmpty() || !signedIn())
         return;
-    if (m_phase == QLatin1String("signin") || m_phase == QLatin1String("bigpicture") || m_stopping)
+    if (m_phase == QLatin1String("signin") || m_stopping)
         return;
     if (running()) {
         for (qint64 pid : allPids()) {
@@ -730,26 +721,13 @@ void SteamClient::signIn()
         startClient(Mode::BigPicture);
 }
 
-void SteamClient::openBigPicture(const QString &url)
+// Вход отменили (PS → «Отменить вход» или «Отмена» в магазине)
+void SteamClient::cancelSignIn()
 {
-    if (m_home.isEmpty() || !signedIn())
+    if (m_phase != QLatin1String("signin") || m_signInDone)
         return;
-    startClient(Mode::BigPicture, url);
-}
-
-void SteamClient::closeBigPicture()
-{
-    if (m_phase == QLatin1String("signin") && !m_signInDone) {
-        // Вход отменили
-        m_signInStarted = 0;
-        stopClient(nullptr);
-        return;
-    }
-    if (m_phase != QLatin1String("bigpicture") && m_phase != QLatin1String("signin"))
-        return;
-    // Перезапуск в фоне — так клиент гарантированно остаётся без окон
-    setPhase(QString());
-    restartSilent();
+    m_signInStarted = 0;
+    stopClient(nullptr);
 }
 
 void SteamClient::onSignedIn()
@@ -896,6 +874,7 @@ void SteamClient::scanManifests()
     // Запросы оболочки, по которым клиент ещё ничего не делает. Пока клиент качает другую
     // игру, остальные просто ждут своей очереди
     bool busyElsewhere = false;
+    QStringList retry;
     for (const Download &d : std::as_const(active))
         busyElsewhere = busyElsewhere || d.status == QLatin1String("downloading");
     for (auto it = m_requests.begin(); it != m_requests.end(); ++it) {
@@ -903,25 +882,33 @@ void SteamClient::scanManifests()
             continue;
         Download d = active.value(it.key());
         const bool started = d.status == QLatin1String("downloading") || d.progress > 0;
-        if (started) {
-            it->confirm = false;
-        } else if (!it->confirm && it->since > 0 && m_online && !busyElsewhere
-                   && m_clock.elapsed() - it->since > ConfirmAfterMs) {
-            it->confirm = true;   // клиент не начал загрузку сам
+        if (!started && !it->failed && it->since > 0 && m_online && !busyElsewhere
+            && m_clock.elapsed() - it->since > RetryAfterMs) {
+            // Клиент не начал загрузку сам: ещё раз кладём appmanifest и тихо перезапускаем
+            // клиент; не помогло и со второго раза — сообщаем об ошибке (окон Steam не показываем)
+            if (it->retries < 1) {
+                ++it->retries;
+                it->since = 0;
+                qWarning("Steam: %s did not start downloading, retrying", qPrintable(it.key()));
+                retry.append(it.key());
+            } else {
+                it->failed = true;
+            }
         }
         d.appId = it.key();
         d.title = it->title;
         if (it->failed) {
             d.status = QStringLiteral("failed");
-            d.message = tr("Не удалось поставить игру на загрузку.");
-        } else if (it->confirm && !started) {
-            d.status = QStringLiteral("confirm");
-            d.message = tr("Подтвердите установку в Steam");
+            d.message = tr("Steam не начал загрузку. Проверьте подключение к интернету и место на диске.");
         } else if (d.status.isEmpty()) {
             d.status = QStringLiteral("queued");
             d.message = m_online ? tr("Steam готовит загрузку…") : tr("Steam запускается…");
         }
         active.insert(it.key(), d);
+    }
+    for (const QString &appId : std::as_const(retry)) {
+        queueManifest(appId);
+        scheduleRestart();
     }
     for (const QString &appId : std::as_const(finished)) {
         const QString title = m_requests.take(appId).title;
@@ -1026,19 +1013,23 @@ void SteamClient::install(const QString &appId, const QString &title)
     if (m_home.isEmpty() || !signedIn() || appId.isEmpty())
         return;
     if (m_requests.contains(appId)) {
-        Request &request = m_requests[appId];
-        if (request.confirm) {
-            // Клиент не начал загрузку сам — установка через диалог Steam
-            openBigPicture(QStringLiteral("steam://install/") + appId);
+        if (!m_requests[appId].failed)
             return;
-        }
-        if (!request.failed)
-            return;
-        request.failed = false;
+        m_requests.remove(appId);   // повтор после ошибки
     }
     if (!installPath(appId).isEmpty())
         return;
     m_requests.insert(appId, Request{title, running() ? m_clock.elapsed() : 0});
+    queueManifest(appId);
+    scanManifests();
+    emit downloadsChanged();
+    scheduleRestart();
+}
+
+// appmanifest игры с флагом «нужно обновление» — пока клиент закрыт
+void SteamClient::queueManifest(const QString &appId)
+{
+    const QString title = m_requests.value(appId).title;
 
     const QString folder = m_manifestDirs.value(appId, root() + QStringLiteral("/steamapps"));
     const QString installDir = m_installDirs.value(appId, folderName(title));
@@ -1075,9 +1066,6 @@ void SteamClient::install(const QString &appId, const QString &title)
         }
         qInfo("Steam: queued %s (%s) in %s", qPrintable(appId), qPrintable(title), qPrintable(folder));
     });
-    scanManifests();
-    emit downloadsChanged();
-    scheduleRestart();
 }
 
 void SteamClient::cancel(const QString &appId)

@@ -57,7 +57,7 @@ public:
     struct Download {
         QString appId;
         QString title;
-        QString status;     // "queued" | "downloading" | "confirm" | "failed"
+        QString status;     // "queued" | "downloading" | "failed"
         double progress = -1;
         QString message;
     };
@@ -72,7 +72,7 @@ public:
     bool running() const;
     bool signedIn() const { return !m_accountName.isEmpty(); }
     // "" — ничего не происходит | "starting" — клиент запускается или обновляется |
-    // "signin" — открыт Big Picture для входа | "bigpicture" — открыт Big Picture |
+    // "signin" — открыт Big Picture для входа (единственный случай, когда Steam виден) |
     // "stopping" — клиент закрывается
     QString phase() const { return m_phase; }
     double phaseProgress() const { return m_phaseProgress; }
@@ -87,13 +87,10 @@ public:
     QList<Download> downloads() const;
     QString installPath(const QString &appId) const;
 
-    // Войти: Big Picture поверх оболочки; закроется сам после входа
+    // Войти: Big Picture поверх оболочки; закроется сам после входа. Больше Steam
+    // никогда не показывается — всё остальное делает оболочка, клиент работает молча
     void signIn();
-    // Открыть Steam Big Picture (магазин, настройки, подтверждение установки).
-    // url — например steam://install/<appid>
-    void openBigPicture(const QString &url = QString());
-    // Закрыть Big Picture (вход или просмотр) — клиент остаётся в фоне
-    void closeBigPicture();
+    void cancelSignIn();
     void signOut();
     void refreshLibrary();
     void install(const QString &appId, const QString &title);
@@ -133,7 +130,8 @@ private:
     void setPhase(const QString &phase, double progress = -1);
     void setMessage(const QString &message);
     void readAccount();
-    void startClient(Mode mode, const QString &url = QString());
+    void startClient(Mode mode);
+    void queueManifest(const QString &appId);
     void stopClient(std::function<void()> then);
     void restartSilent();
     void scheduleRestart();
@@ -170,7 +168,7 @@ private:
     struct Request {
         QString title;
         qint64 since = 0;       // мс от m_clock, когда клиент запустился с этим запросом
-        bool confirm = false;   // клиент сам не начал загрузку — нужно подтвердить в Big Picture
+        int retries = 0;        // сколько раз клиент тихо перезапускали, потому что он не начал загрузку
         bool failed = false;
     };
     QMap<QString, Request> m_requests;          // поставленные из оболочки загрузки

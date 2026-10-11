@@ -170,7 +170,7 @@ void GameLauncher::checkStarted()
         if (elapsed >= (isSteam() ? SteamGiveUpMs : GiveUpMs)) {
             qWarning("Game process not detected after %lld ms", qlonglong(elapsed));
             if (isSteam()) {
-                fail(tr("Steam не запустил игру. Откройте Steam (Магазин → Steam → «Открыть Steam») и проверьте, не ждёт ли он подтверждения."));
+                fail(tr("Steam не запустил игру. Проверьте подключение к интернету и попробуйте ещё раз."));
                 return;
             }
             // Процесс Proton жив, а процесса игры не видно — убираем экран, игра, возможно, идёт

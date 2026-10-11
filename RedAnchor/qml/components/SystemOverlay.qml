@@ -106,7 +106,7 @@ Window {
         return gameRunning && game && game.id ? GameArt.art(game.id, game.store, game.appId, game.title) : ({})
     }
     readonly property string steamPhase: (StoreManager.stores.steam || {}).phase || ""
-    readonly property bool steamShown: steamPhase === "signin" || steamPhase === "bigpicture"
+    readonly property bool steamShown: steamPhase === "signin"
     readonly property var items: {
         const list = []
         if (gameRunning && game)
@@ -311,8 +311,8 @@ Window {
         id: steamPanel
         ActionList {
             actions: [
-                { text: overlay.steamPhase === "signin" ? qsTr("Отменить вход в Steam") : qsTr("Вернуться в RedAnchor"),
-                  icon: "close", run: () => { overlay.close(); StoreManager.closeSteam() } }
+                { text: qsTr("Отменить вход в Steam"), icon: "close",
+                  run: () => { overlay.close(); StoreManager.cancelSteamSignIn() } }
             ]
         }
     }

@@ -1,16 +1,16 @@
 import QtQuick
 
-// Подложка, пока поверх оболочки открыт Steam Big Picture (вход в Steam, магазин Steam,
-// подтверждение установки). Окно Steam встаёт поверх, как игра; эта подложка видна, пока
-// окно Steam ещё не появилось (клиент запускается или обновляется) и сразу после него.
-// Вернуться в RedAnchor — PS (оверлей → Steam → «Вернуться в RedAnchor»). ○ здесь не
-// используем: геймпад в это время управляет Steam, и ○ там — «назад».
+// Подложка, пока поверх оболочки открыт Steam Big Picture для входа в аккаунт (единственный
+// раз, когда Steam виден). Окно Steam встаёт поверх, как игра; подложка видна, пока его ещё
+// нет (клиент запускается или обновляется). После входа Big Picture закрывается сам.
+// Отменить вход — PS → Steam → «Отменить вход». ○ здесь не используем: геймпад в это время
+// управляет Steam, и ○ там — «назад».
 FocusScope {
     id: root
 
     readonly property var steam: StoreManager.stores.steam || ({})
     readonly property string phase: steam.phase || ""
-    readonly property bool shown: phase === "signin" || phase === "bigpicture"
+    readonly property bool shown: phase === "signin"
     property Item returnFocus: null
 
     visible: opacity > 0
@@ -28,7 +28,7 @@ FocusScope {
     }
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Escape)
-            StoreManager.closeSteam()
+            StoreManager.cancelSteamSignIn()
         event.accepted = true
     }
 
@@ -54,7 +54,7 @@ FocusScope {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: root.phase === "signin" ? qsTr("Вход в Steam") : qsTr("Steam Big Picture")
+            text: qsTr("Вход в Steam")
             color: Theme.textPrimary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontTitle
@@ -66,9 +66,7 @@ FocusScope {
             wrapMode: Text.WordWrap
             text: root.steam.phaseProgress >= 0
                   ? qsTr("Steam обновляется: %1%. Первый запуск может занять несколько минут.").arg(Math.round(root.steam.phaseProgress * 100))
-                  : root.phase === "signin"
-                    ? qsTr("Войдите в аккаунт Steam в открывшемся окне — геймпадом или по QR-коду. После входа вы вернётесь в RedAnchor автоматически.")
-                    : qsTr("Steam открыт поверх RedAnchor.")
+                  : qsTr("Войдите в аккаунт Steam в открывшемся окне — геймпадом или по QR-коду. После входа вы вернётесь в RedAnchor автоматически.")
             color: Theme.textSecondary
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontBody
@@ -85,7 +83,7 @@ FocusScope {
         }
         GlyphText {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: qsTr("{ps} — вернуться в RedAnchor")
+            text: qsTr("{ps} — отменить вход")
             color: Theme.textSecondary
             pixelSize: Theme.fontSmall
         }

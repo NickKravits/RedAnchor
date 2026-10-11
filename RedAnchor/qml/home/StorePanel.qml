@@ -39,15 +39,6 @@ FocusScope {
     }
 
     function activate(game) {
-        if (game.status === "confirm") {
-            // Клиент Steam сам не начал загрузку — установка через его окно
-            menu.show(game.title, qsTr("Steam не начал загрузку сам. Подтвердите установку в окне Steam — оно откроется поверх RedAnchor."), [
-                { text: qsTr("Подтвердить в Steam"), icon: "download", run: () => StoreManager.install(root.store, game.appId, game.title) },
-                { text: qsTr("Отменить загрузку"), icon: "close", run: () => StoreManager.cancel(game.id) },
-                { text: qsTr("Отмена") }
-            ], grid)
-            return
-        }
         if (game.status === "queued" || game.status === "downloading") {
             menu.show(game.title, game.status === "queued" ? qsTr("В очереди на загрузку") : qsTr("Загружается"), [
                 { text: qsTr("Отменить загрузку"), icon: "close", run: () => StoreManager.cancel(game.id) },
@@ -255,28 +246,16 @@ FocusScope {
                 text: qsTr("Обновить")
                 icon: "refresh"
                 enabledState: !root.state_.busy
-                KeyNavigation.right: root.isSteam ? openSteamButton : signOutButton
-                KeyNavigation.down: grid.count > 0 ? grid : null
-                onClicked: StoreManager.refresh(root.store)
-            }
-            // Steam Big Picture поверх оболочки: магазин Steam, покупки, настройки
-            ConsoleButton {
-                id: openSteamButton
-                visible: root.isSteam
-                anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("Открыть Steam")
-                icon: "steam"
-                KeyNavigation.left: refreshButton
                 KeyNavigation.right: signOutButton
                 KeyNavigation.down: grid.count > 0 ? grid : null
-                onClicked: StoreManager.openSteam()
+                onClicked: StoreManager.refresh(root.store)
             }
             ConsoleButton {
                 id: signOutButton
                 anchors.verticalCenter: parent.verticalCenter
                 text: qsTr("Выйти")
                 icon: "logout"
-                KeyNavigation.left: root.isSteam ? openSteamButton : refreshButton
+                KeyNavigation.left: refreshButton
                 KeyNavigation.down: grid.count > 0 ? grid : null
                 onClicked: menu.show(qsTr("Выйти из %1?").arg(Format.storeName(root.store)),
                                      qsTr("Установленные игры останутся на консоли."), [
@@ -291,7 +270,7 @@ FocusScope {
             anchors.centerIn: parent
             icon: "store"
             title: qsTr("Игр не найдено")
-            text: root.isSteam ? qsTr("В библиотеке Steam пока нет игр. Купить игры можно в магазине Steam: «Открыть Steam».")
+            text: root.isSteam ? qsTr("В библиотеке Steam пока нет игр.")
                                : qsTr("В этом аккаунте %1 пока нет игр.").arg(Format.storeName(root.store))
         }
 
