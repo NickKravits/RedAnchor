@@ -18,7 +18,7 @@ class QTimer;
 // Официальный клиент Steam — по одному аккаунту Steam на пользователя консоли.
 //
 // У каждого пользователя консоли свой каталог Steam: клиент запускается с HOME =
-// profiles/<id>/stores/steam/home, поэтому вход, библиотека и игры не смешиваются.
+// ~/.local/share/redanchor/steam/<id профиля>, поэтому вход, библиотека и игры не смешиваются.
 // Клиент обновляется сам.
 //
 // Вход — один раз: оболочка открывает Steam Big Picture (окно Steam встаёт поверх оболочки
@@ -63,6 +63,9 @@ public:
     };
 
     explicit SteamClient(QObject *parent = nullptr);
+
+    // HOME клиента Steam для профиля (вне каталога профиля — см. homeFor)
+    static QString homePath(const QString &profileDir);
     ~SteamClient() override;
 
     // Каталог профиля пользователя консоли (пусто — пользователя нет). Прежний клиент закрывается.
@@ -118,7 +121,8 @@ signals:
 private:
     enum class Mode { Silent, BigPicture };
 
-    QString root() const;           // ~/.local/share/Steam внутри HOME клиента
+    QString root() const;           // каталог клиента внутри его HOME
+    static QString homeFor(const QString &profileDir);   // с переносом из прежнего места
     QString steamExecutable() const;
     QProcessEnvironment environment() const;
     QString wrapperPath() const;

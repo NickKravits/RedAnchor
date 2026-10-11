@@ -27,7 +27,7 @@ class SteamClient;
 // Всё остальное своё у каждого пользователя консоли (папка профиля):
 //   stores/<магазин>/  — вход в магазин, кэш списка игр (Steam — ещё и HOME клиента Steam);
 //   games/gog/         — установленные игры GOG; игры Steam — в библиотеке клиента
-//                         (stores/steam/home/.local/share/Steam/steamapps).
+//                         (~/.local/share/redanchor/steam/<id>/.steam/…/steamapps).
 //
 // Steam: вход один раз в Steam Big Picture (поверх оболочки, как игра), дальше клиент работает
 // в фоне; библиотека, установка и запуск — через него (подробности — в steamclient.h).

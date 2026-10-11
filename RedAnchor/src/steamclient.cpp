@@ -170,9 +170,84 @@ SteamClient::~SteamClient()
 
 // ---------- Пути ----------
 
+// Каталог клиента. Steam сам ставит ссылку ~/.steam/root на него; пока клиента ещё нет —
+// туда, куда его поставит запуск: пакет Debian/Ubuntu (steam-installer) кладёт клиент в
+// ~/.steam/debian-installation, пакет Valve — в ~/.local/share/Steam
 QString SteamClient::root() const
 {
-    return m_home.isEmpty() ? QString() : m_home + QStringLiteral("/.local/share/Steam");
+    if (m_home.isEmpty())
+        return {};
+    for (const char *link : {"/.steam/root", "/.steam/steam"}) {
+        const QString target = QFileInfo(m_home + QLatin1String(link)).canonicalFilePath();
+        if (!target.isEmpty())
+            return target;
+    }
+    const QString debian = m_home + QStringLiteral("/.steam/debian-installation");
+    if (QFileInfo::exists(debian))
+        return debian;
+    QFile launcher(steamExecutable());
+    if (launcher.open(QIODevice::ReadOnly) && launcher.read(64 * 1024).contains("debian-installation"))
+        return debian;
+    return m_home + QStringLiteral("/.local/share/Steam");
+}
+
+// HOME клиента — вне профиля, в пути без пробелов: в пути профиля есть пробел
+// («RedAnchor Shell»), а скрипт запуска Steam из Ubuntu на нём ломается (сверка SHA-256
+// загруженного клиента отрезает путь по последнему пробелу и всегда не сходится)
+QString SteamClient::homePath(const QString &profileDir)
+{
+    if (profileDir.isEmpty())
+        return {};
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/redanchor/steam/")
+           + QFileInfo(profileDir).fileName();
+}
+
+QString SteamClient::homeFor(const QString &profileDir)
+{
+    if (profileDir.isEmpty())
+        return {};
+    const QString home = homePath(profileDir);
+    // Перенос из прежнего места (profiles/<id>/stores/steam/home)
+    const QString old = profileDir + QStringLiteral("/stores/steam/home");
+    if (QFileInfo(old).isDir() && !QFileInfo::exists(home)) {
+        QDir().mkpath(QFileInfo(home).absolutePath());
+        if (QDir().rename(old, home)) {
+            qInfo("Steam home moved to %s", qPrintable(home));
+            // Ссылки ~/.steam/steam и ~/.steam/root указывают на старый путь
+            for (const char *name : {"/.steam/steam", "/.steam/root"}) {
+                const QString link = home + QLatin1String(name);
+                const QString target = QFileInfo(link).symLinkTarget();
+                if (!target.isEmpty() && target.startsWith(old)) {
+                    QFile::remove(link);
+                    QFile::link(home + target.mid(old.size()), link);
+                }
+            }
+            // Пути библиотек в настройках клиента
+            const QStringList vdfs = {QStringLiteral("/steamapps/libraryfolders.vdf"), QStringLiteral("/config/libraryfolders.vdf")};
+            for (const QString &steamDir : {home + QStringLiteral("/.steam/debian-installation"), home + QStringLiteral("/.local/share/Steam")}) {
+                for (const QString &vdf : vdfs) {
+                    QFile file(steamDir + vdf);
+                    if (!file.open(QIODevice::ReadOnly))
+                        continue;
+                    QByteArray text = file.readAll();
+                    file.close();
+                    const QByteArray from = old.toUtf8(), to = home.toUtf8();
+                    if (!text.contains(from))
+                        continue;
+                    text.replace(from, to);
+                    QSaveFile out(steamDir + vdf);
+                    if (out.open(QIODevice::WriteOnly)) {
+                        out.write(text);
+                        out.commit();
+                    }
+                }
+            }
+        } else {
+            qWarning("Cannot move Steam home %s to %s, keeping the old one", qPrintable(old), qPrintable(home));
+            return old;
+        }
+    }
+    return home;
 }
 
 QString SteamClient::steamExecutable() const
@@ -332,7 +407,7 @@ void SteamClient::setProfile(const QString &profileDir)
     const auto switchTo = [this, profileDir] {
         ++m_generation;
         m_profile = profileDir;
-        m_home = profileDir.isEmpty() ? QString() : profileDir + QStringLiteral("/stores/steam/home");
+        m_home = homeFor(profileDir);
         if (!m_home.isEmpty())
             QDir().mkpath(m_home);
         m_requests.clear();
